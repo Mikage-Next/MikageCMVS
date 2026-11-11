@@ -46,7 +46,8 @@ mod preferences;
 mod save;
 mod slot_edit;
 pub use save::{
-    SaveTime, save_time_from_unix, snapshot_layout_supported, thumbnail_bmp, utc_save_time,
+    SaveTime, save_time_from_unix, snapshot_layout_for, snapshot_layout_supported, thumbnail_bmp,
+    utc_save_time,
 };
 
 enum SystemOutput {
@@ -175,7 +176,23 @@ impl<'a> Startup<'a> {
         game: &Game<'a>,
         virtual_tick: u32,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut machine = Machine::new(script)?;
+        Self::new_with_encoding(
+            script,
+            root,
+            game,
+            virtual_tick,
+            crate::TextEncoding::default(),
+        )
+    }
+    /// Start with an explicit game text encoding. `new` retains the original Shift-JIS default.
+    pub fn new_with_encoding(
+        script: &'a Script,
+        root: &Path,
+        game: &Game<'a>,
+        virtual_tick: u32,
+        encoding: crate::TextEncoding,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut machine = Machine::new_with_encoding(script, encoding)?;
         if let Some([integers, bits, floats, strings]) = game.selection.profile.initial_globals() {
             // Verified PE zero-fill globals (docs/games/aoitori/vm-semantics.md
             // and docs/games/hapymaherfd/README.md). Keep standalone
@@ -201,7 +218,7 @@ impl<'a> Startup<'a> {
         let screen_size = configuration.screen_size_for_profile(game.selection.profile)?;
         let mut scene = SceneHost::for_profile(game.selection.profile);
         scene.set_screen_size(screen_size);
-        let mut buttons = ButtonHost::default();
+        let mut buttons = ButtonHost::for_profile(game.selection.profile);
         buttons.set_screen_size(screen_size);
         let mut camera = CameraHost::for_profile(game.selection.profile);
         camera.set_screen_size(screen_size);
@@ -220,6 +237,9 @@ impl<'a> Startup<'a> {
         let effects = crate::save_menu::profile_int(text, "SYSTEM_INFO", "EFFECT_USE", 1) != 0;
         let mut platform = PlatformHost::default();
         platform.configure_display_selection(text);
+        if game.selection.profile.is_inspected_20070119() {
+            platform.configure_window_full_move(text);
+        }
         Ok(Self {
             slot_edit: None,
             main_script_name: if game.files.start_name() == b"start.ps2" {
@@ -258,7 +278,7 @@ impl<'a> Startup<'a> {
             platform,
             scene,
             buttons,
-            movies: MovieHost::default(),
+            movies: MovieHost::for_profile(game.selection.profile),
             scene_movies: ResourceArchives::new(root)?,
             root: fs::canonicalize(root)?,
             sequence: SequenceHost::default(),
@@ -374,6 +394,14 @@ impl<'a> Startup<'a> {
     pub fn set_mgv_factory(&mut self, factory: Box<dyn crate::mgv::DecoderFactory>) {
         self.movies.set_mgv_factory(factory);
     }
+    /// See [`crate::movie::MovieHost::set_scene_prefetch`].
+    pub fn set_scene_prefetch(&mut self, on_thread_start: fn()) {
+        self.movies.set_scene_prefetch(on_thread_start);
+    }
+    /// See [`crate::image::ImageArchives::set_decoded_cache_limit`].
+    pub fn set_decoded_image_cache(&mut self, bytes: usize) {
+        self.images.set_decoded_cache_limit(bytes);
+    }
     pub fn set_decode_movie_frames(&mut self, enabled: bool) {
         self.movies.set_decode_frames(enabled);
     }
@@ -485,11 +513,12 @@ impl<'a> Startup<'a> {
             self.frame_delta = 0;
             return Ok(());
         }
-        self.sequence.advance_frame_with_hosts(
+        self.sequence.advance_frame_with_windows(
             delta_ms,
             &mut self.scene,
             &mut self.images.with_paths(self.bootstrap.paths()),
             &mut self.camera,
+            &mut self.messages,
         )?;
         self.scene.advance_frame(delta_ms);
         self.scene
@@ -498,6 +527,13 @@ impl<'a> Startup<'a> {
         self.messages
             .advance_auxiliary_motion(delta_ms, &mut self.scene)?;
         self.camera.advance_frame(delta_ms);
+        // cmvs-20070119 0x407810 updates the effect slots after the view motion.
+        self.scene.advance_legacy_effects(
+            delta_ms,
+            &mut self.camera,
+            self.audio.settings(),
+            self.audio_backend.as_mut(),
+        )?;
         self.frame_delta = delta_ms;
         self.take_capture()
     }
@@ -565,11 +601,14 @@ impl<'a> Startup<'a> {
     pub fn audio(&self) -> &AudioHost {
         &self.audio
     }
-    /// Defaults to a recording backend that reports nothing started.
+    /// Defaults to a recording backend that reports nothing started. The new backend
+    /// receives the paths and keys registered so far.
     pub fn set_audio_backend(
         &mut self,
         mut backend: Box<dyn AudioBackend>,
     ) -> Result<(), Box<dyn Error>> {
+        backend.configure_paths(self.bootstrap.paths())?;
+        backend.configure_archive_parameters(self.bootstrap.archive_parameters())?;
         backend.configure_voice_ducking(self.audio.voice_ducking())?;
         if !self.audio.output_enabled() {
             backend.set_output_enabled(false)?;
@@ -596,6 +635,14 @@ impl<'a> Startup<'a> {
             return Err("select one system-save output mode before VM execution".into());
         }
         let profile = ProfileSystemSave::open(path, &self.root)?;
+        self.set_save_profile(profile)
+    }
+    /// Install an already locked profile, including an explicitly selected
+    /// game-local savedata profile. The lock remains owned by this session.
+    pub fn set_save_profile(&mut self, profile: ProfileSystemSave) -> Result<(), Box<dyn Error>> {
+        if self.steps != 0 || self.system_output.is_some() {
+            return Err("select one system-save output mode before VM execution".into());
+        }
         let saves = DirectorySaves::new(profile.directory())?;
         let configuration = profile.read_configuration()?;
         let primary = profile.path();
@@ -786,6 +833,11 @@ impl<'a> Startup<'a> {
                 .configure_parameters(self.bootstrap.archive_parameters());
             self.scene_movies
                 .configure_parameters(self.bootstrap.archive_parameters());
+            // The audio backend keeps its own copy, so every later sound load by name
+            // sees the current registrations and keys.
+            self.audio_backend.configure_paths(self.bootstrap.paths())?;
+            self.audio_backend
+                .configure_archive_parameters(self.bootstrap.archive_parameters())?;
             return Ok(if flow == Some(crate::dispatch::Flow::Done) {
                 StartupEvent::Progress
             } else {
@@ -795,16 +847,11 @@ impl<'a> Startup<'a> {
                 }
             });
         }
-        if matches!(command, 0xa0 | 0xa4 | 0xa6 | 0xb0 | 0xba | 0x2d6 | 0x2d7) {
-            self.audio_backend.configure_paths(self.bootstrap.paths())?;
-            self.audio_backend
-                .configure_archive_parameters(self.bootstrap.archive_parameters())?;
-        }
         let gate = SkipGate {
             effects: self.effects,
             skip: self.message_flags.skip(),
         };
-        if crate::dispatch::is_wait(command) {
+        if crate::dispatch::is_wait_for(resolved.semantics, command) {
             let flow = crate::dispatch::run(
                 resolved.semantics,
                 &mut self.machine,
@@ -909,6 +956,7 @@ impl<'a> Startup<'a> {
             .scene_movies
             .with_paths(self.bootstrap.paths(), ResourceKind::SceneMovie);
         let is_movie_player = crate::dispatch::uses_movie_player_for(resolved.semantics, command);
+        let mut sequence_messages = Some(&mut self.messages);
         let mut hosts = crate::dispatch::Hosts {
             runtime: true,
             message_wait: None,
@@ -964,7 +1012,7 @@ impl<'a> Startup<'a> {
             effects: Some(&mut self.effects),
         };
         if crate::dispatch::uses_message_state(command) {
-            hosts.messages = Some(&mut self.messages);
+            hosts.messages = sequence_messages.take();
             if crate::dispatch::uses_input_for(resolved.semantics, command) {
                 hosts.input = Some(crate::dispatch::InputHosts {
                     input: &mut self.input,
@@ -978,9 +1026,9 @@ impl<'a> Startup<'a> {
                 skip: message_flags.skip(),
                 clock: Some(input_clock),
             });
-        } else {
+        } else if !crate::dispatch::uses_sequence(command) {
             hosts.text = Some(crate::dispatch::TextHosts {
-                messages: &mut self.messages,
+                messages: sequence_messages.take().expect("text owns message host"),
                 input: &mut self.input,
                 flags: message_flags,
             });
@@ -1014,6 +1062,7 @@ impl<'a> Startup<'a> {
                     scene: &mut self.scene,
                     images: &mut image_source,
                     camera: Some(&mut self.camera),
+                    messages: sequence_messages.take(),
                 }),
             });
         } else {

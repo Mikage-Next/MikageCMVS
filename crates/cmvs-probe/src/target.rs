@@ -122,7 +122,6 @@ impl Target {
             .map(|(patch, _)| patch);
         if patch.is_some() {
             capabilities.insert(cap::PATCH);
-            cmvs_core::encoding::set(cmvs_core::encoding::TextEncoding::Gbk);
         }
         Self {
             root: root.to_path_buf(),

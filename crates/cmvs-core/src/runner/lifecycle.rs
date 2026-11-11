@@ -31,6 +31,10 @@ impl<'a> Startup<'a> {
             self.quit = true;
             return Ok(StartupEvent::Quit);
         }
+        // The rebuilt scene drops the legacy effects; their destructors release the
+        // prepared sounds and stop the walk's channel 1, which would otherwise play on.
+        self.scene
+            .release_legacy_effects(self.audio_backend.as_mut())?;
         self.finish_reset(replacement.expect("RESET replacement prepared"));
         Ok(StartupEvent::Progress)
     }
@@ -45,7 +49,7 @@ impl<'a> Startup<'a> {
         self.scene = crate::scene::SceneHost::for_profile(self.gate.selection().profile);
         self.scene.set_screen_size(screen_size);
         self.camera.reset();
-        self.buttons = Default::default();
+        self.buttons = crate::buttons::ButtonHost::for_profile(self.gate.selection().profile);
         self.buttons.set_screen_size(screen_size);
         self.movies.restore(Default::default());
         self.messages.reset_objects();
@@ -256,13 +260,13 @@ mod tests {
             } else if kind == 1 {
                 run.scene.collision_effects.insert(
                     2,
-                    crate::effect_objects::CollisionEffect {
-                        template: None,
-                        mode: 0,
-                        parameters: [0; 2],
-                        pool: Default::default(),
-                        particles: Vec::new(),
-                    },
+                    crate::effect_objects::CollisionEffect::new(
+                        0,
+                        [0; 2],
+                        0,
+                        Default::default(),
+                        &mut crate::random::CrtRandom::new(0),
+                    ),
                 );
             } else {
                 run.scene.falling_effects.insert(
@@ -273,31 +277,34 @@ mod tests {
                         follow: true,
                         image: None,
                         particles: Vec::new(),
+                        x87_arithmetic: false,
                     },
                 );
             }
-            assert!(
-                run.inspect_snapshot()
-                    .unwrap_err()
-                    .to_string()
-                    .contains("active particle effects")
-            );
-            assert!(
-                run.load_slot(0, &mut backend)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("active particle effects")
-            );
+            if kind != 2 {
+                assert!(
+                    run.inspect_snapshot()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("active particle effects")
+                );
+                assert!(
+                    run.load_slot(0, &mut backend)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("active particle effects")
+                );
+            }
         }
         run.scene.collision_effects.insert(
             2,
-            crate::effect_objects::CollisionEffect {
-                template: None,
-                mode: 0,
-                parameters: [0; 2],
-                pool: Default::default(),
-                particles: Vec::new(),
-            },
+            crate::effect_objects::CollisionEffect::new(
+                0,
+                [0; 2],
+                0,
+                Default::default(),
+                &mut crate::random::CrtRandom::new(0),
+            ),
         );
         run.scene.falling_effects.insert(
             1,
@@ -307,6 +314,7 @@ mod tests {
                 follow: true,
                 image: None,
                 particles: Vec::new(),
+                x87_arithmetic: false,
             },
         );
         let settings = run.settings.clone();

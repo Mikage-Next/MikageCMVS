@@ -4,7 +4,7 @@ mod pack;
 mod profile;
 mod write;
 use crate::{FormatError, MAX_PAYLOAD, dispatch::Call, evaluate::State, machine::Machine};
-pub use profile::{HOST_SAVE_FOLDER, ProfileSystemSave};
+pub use profile::ProfileSystemSave;
 use std::{
     error::Error,
     io::{self, Read},

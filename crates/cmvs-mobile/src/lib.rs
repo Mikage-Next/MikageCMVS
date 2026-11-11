@@ -19,11 +19,6 @@ pub mod session;
 // face lookup by name and glyph rasterising with ab_glyph.
 pub use cmvs_font::{font, font_library};
 
-// The desktop host's MGV1 (Ogg/Theora) movie decoder, compiled here unchanged so
-// upstream fixes arrive with every sync. It needs nothing from the desktop window.
-#[path = "../../cmvs-desktop/src/video.rs"]
-#[allow(clippy::all)]
-mod video;
 
 use session::{Config, Encoding, FontFile, Session, Status};
 use std::{

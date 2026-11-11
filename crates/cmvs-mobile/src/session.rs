@@ -10,7 +10,7 @@ use crate::{
     select::{self, Basis},
 };
 use cmvs_core::{
-    encoding::TextEncoding,
+    TextEncoding,
     input::KeyBindings,
     message::MESSAGE_WINDOWS,
     ps3::Script,
@@ -18,6 +18,7 @@ use cmvs_core::{
     runner::{SaveTime, Startup, StartupEvent, load_start},
     scene_render::prepare_scene,
     settings::DEFAULT_FONT_FACE,
+    system_save::ProfileSystemSave,
 };
 use cmvs_wgpu::{GpuFrame, Presenter, Renderer, wgpu};
 use rodio::mixer::MixerSource;
@@ -84,7 +85,6 @@ pub struct Session {
     // Fields drop in order: the engine (and its audio channels) before the GPU.
     startup: Startup<'static>,
     root: PathBuf,
-    encoding: TextEncoding,
     bindings: KeyBindings,
     input: MobileInput,
     display: DisplayState,
@@ -108,22 +108,8 @@ impl Session {
     pub fn open(config: Config) -> Result<Self> {
         let root = config.game_dir.canonicalize()?;
         let patch = patch::find(&root)?;
-        let encoding = match config.encoding {
-            Encoding::ShiftJis => TextEncoding::ShiftJis,
-            Encoding::Gbk => TextEncoding::Gbk,
-            Encoding::Automatic if patch.is_some() => TextEncoding::Gbk,
-            Encoding::Automatic => TextEncoding::ShiftJis,
-        };
-        // Text and font decoding read it on the thread that runs the game.
-        cmvs_core::encoding::set(encoding);
-        if let Some((_, line)) = &patch {
-            log::emit(
-                log::INFO,
-                &format!("translation patch: {line}, text {encoding:?}"),
-            );
-        }
+        let patch_line = patch.as_ref().map(|(_, line)| line.clone());
         let patch = patch.map(|(patch, _)| patch);
-        let font = font_renderer(&config.fonts)?;
         let selection = select::select(&root)?;
         for line in selection.game.selection.log_lines() {
             log::emit(log::INFO, line.trim_start_matches("# "));
@@ -160,19 +146,46 @@ impl Session {
             Some(raw) => Script::decode_patch(&raw)?,
             None => load_start(&root, &selection.game.files)?,
         };
+        // A Pk translation patch is GBK. Otherwise the game's own script text decides,
+        // as upstream's desktop player does (GBK-converted executables, UTF-8 builds).
+        let encoding = match config.encoding {
+            Encoding::ShiftJis => TextEncoding::ShiftJis,
+            Encoding::Gbk => TextEncoding::Gbk,
+            Encoding::Automatic if patch.is_some() => TextEncoding::Gbk,
+            Encoding::Automatic => {
+                cmvs_font::text_codec::detect_game(&root, &selection.game.files, &start)
+                    .unwrap_or(TextEncoding::ShiftJis)
+            }
+        };
+        match &patch_line {
+            Some(line) => log::emit(
+                log::INFO,
+                &format!("translation patch: {line}, text {encoding:?}"),
+            ),
+            None => log::emit(log::INFO, &format!("text {encoding:?}")),
+        }
+        let font = font_renderer(&config.fonts)?.with_text_encoding(encoding);
         let script: &'static _ = Box::leak(Box::new(start));
-        let mut startup = Startup::new(script, &root, &selection.game, 0)?;
+        let mut startup =
+            Startup::new_with_encoding(script, &root, &selection.game, 0, encoding)?;
         startup.set_patch(patch);
-        // MGV1 movies (Ogg/Theora), decoded by the desktop host's pure-Rust decoder.
-        startup.set_mgv_factory(Box::new(crate::video::TheoraFactory));
+        // MGV1 movies (Ogg/Theora), decoded by upstream's pure-Rust cmvs-video, which
+        // decodes ahead on a worker thread as the desktop and console hosts do.
+        startup.set_mgv_factory(Box::new(cmvs_video::PrefetchTheoraFactory::default()));
         // The gate runs presumed and unreviewed commands unless told to block them
         // (upstream's --block-* research switches); a player never blocks, recorded
         // game or not.
-        let save_dir = config
-            .save_dir
-            .clone()
-            .unwrap_or_else(|| root.join(cmvs_core::system_save::HOST_SAVE_FOLDER));
-        startup.set_user_data_directory(&save_dir)?;
+        // `<game>/savedata` is the one folder inside the game that may be written,
+        // through upstream's explicit opt-in; any other folder must be outside it.
+        let game_savedata = root.join("savedata");
+        let save_dir = config.save_dir.clone().unwrap_or_else(|| game_savedata.clone());
+        let in_game = save_dir == game_savedata
+            || save_dir.canonicalize().is_ok_and(|dir| dir == game_savedata);
+        if in_game {
+            startup.set_save_profile(ProfileSystemSave::open_game_savedata(&root)?)?;
+        } else {
+            startup.set_user_data_directory(&save_dir)?;
+        }
         startup.set_decode_movie_frames(true);
         let (mixer, audio_source) = audio::mixer();
         startup.set_audio_backend(Box::new(cmvs_audio::NativeAudio::from_mixer(&root, mixer)?))?;
@@ -194,7 +207,6 @@ impl Session {
         Ok(Self {
             startup,
             root,
-            encoding,
             bindings,
             input: MobileInput::default(),
             display: DisplayState {
@@ -344,7 +356,6 @@ impl Session {
     /// Runs the game for up to one step budget after `dt_ms` of wall time, then
     /// advances effects and draws when the VM reached a frame boundary.
     pub fn step(&mut self, dt_ms: u32) -> Status {
-        cmvs_core::encoding::set(self.encoding);
         if self.status != Status::Running {
             return self.status.clone();
         }
@@ -476,7 +487,6 @@ impl Session {
 
     /// The current frame drawn on the CPU (tests and thumbnails; no GPU needed).
     pub fn render_cpu(&mut self) -> Result<RgbaImage> {
-        cmvs_core::encoding::set(self.encoding);
         if let Some(image) = self.startup.movie_frame() {
             return Ok(image.clone());
         }

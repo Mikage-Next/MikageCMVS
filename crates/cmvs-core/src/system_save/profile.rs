@@ -41,30 +41,20 @@ fn external_directory(path: &Path, game_root: &Path) -> io::Result<PathBuf> {
     for name in missing.into_iter().rev() {
         resolved.push(name);
     }
-    if resolved.starts_with(&game_root) && !is_host_save_folder(&resolved, &game_root) {
+    if resolved.starts_with(&game_root) {
         return Err(io::Error::other(
             "user data directory must be outside the read-only game root",
         ));
     }
     fs::create_dir_all(&resolved)?;
     let resolved = fs::canonicalize(&resolved)?;
-    if resolved.starts_with(&game_root) && !is_host_save_folder(&resolved, &game_root) {
+    if resolved.starts_with(game_root) {
         return Err(io::Error::other(
             "user data directory resolves inside the read-only game root",
         ));
     }
     Ok(resolved)
 }
-
-/// Mikage keeps every engine's saves in `<game>/savedata`, next to the game files.
-/// That one folder is the exception to the outside-the-game-root rule: the engine
-/// never reads game resources from it, and nothing else under the root is written.
-fn is_host_save_folder(path: &Path, game_root: &Path) -> bool {
-    path.parent() == Some(game_root)
-        && path.file_name() == Some(std::ffi::OsStr::new(HOST_SAVE_FOLDER))
-}
-/// The folder name `is_host_save_folder` accepts.
-pub const HOST_SAVE_FOLDER: &str = "savedata";
 
 struct StagedFile {
     path: PathBuf,
@@ -96,6 +86,35 @@ pub struct ProfileSystemSave {
 impl ProfileSystemSave {
     pub fn open(directory: &Path, game_root: &Path) -> io::Result<Self> {
         let directory = external_directory(directory, game_root)?;
+        Self::open_directory(directory)
+    }
+    /// Explicitly opt into the game's own savedata directory. Other game files
+    /// remain read-only, and a symlink may not redirect writes into resources.
+    pub fn open_game_savedata(game_root: &Path) -> io::Result<Self> {
+        let game_root = fs::canonicalize(game_root)?;
+        let directory = game_root.join("savedata");
+        match fs::create_dir_all(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        let metadata = fs::symlink_metadata(&directory)?;
+        if !fs::is_dir(&directory) || metadata.file_type().is_symlink() {
+            return Err(io::Error::other("savedata must be a real directory"));
+        }
+        let directory = fs::canonicalize(directory)?;
+        if directory.parent() != Some(game_root.as_path()) {
+            return Err(io::Error::other(
+                "savedata resolves outside the game directory",
+            ));
+        }
+        let profile = Self::open_directory(directory)?;
+        // Opening an existing lock alone does not prove that saves can be
+        // created or atomically replaced in this directory.
+        drop(profile.stage(&[])?);
+        Ok(profile)
+    }
+    fn open_directory(directory: PathBuf) -> io::Result<Self> {
         let lock_path = directory.join(".cmvs-system.lock");
         if regular_file(&lock_path)? && fs::metadata(&lock_path)?.len() != 0 {
             return Err(io::Error::other("profile lock file must be empty"));
@@ -109,9 +128,30 @@ impl ProfileSystemSave {
         if lock.metadata()?.len() != 0 {
             return Err(io::Error::other("profile lock file must be empty"));
         }
-        #[cfg(not(target_os = "horizon"))]
-        lock.try_lock().map_err(|error| {
-            io::Error::other(format!("cannot lock user data directory: {error}"))
+        // std::fs::File locking is unsupported on Android. Use the same
+        // nonblocking OS flock there, retaining the descriptor until drop.
+        #[cfg(target_os = "android")]
+        let locked = rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+            .map_err(io::Error::from);
+        // The browser adapter already returns io::Error rather than std's
+        // TryLockError; keep its worker-local lock result unchanged.
+        #[cfg(target_arch = "wasm32")]
+        let locked = lock.try_lock();
+        // Horizon and the Vita run one application at a time and their std has no
+        // file locks; the open lock file alone marks the profile.
+        #[cfg(not(any(
+            target_os = "android",
+            target_os = "horizon",
+            target_os = "vita",
+            target_arch = "wasm32"
+        )))]
+        let locked = lock.try_lock().map_err(io::Error::from);
+        #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
+        locked.map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot lock user data directory: {error}"),
+            )
         })?;
         let profile = Self {
             directory,

@@ -24,10 +24,8 @@ cmvs-core = { path = "../cmvs-core" }
 cmvs-wgpu = { path = "../cmvs-wgpu" }
 cmvs-audio = { path = "../cmvs-audio", default-features = false, features = ["mixer"] }
 cmvs-font = { path = "../cmvs-font" }
-# MGV1 movies: the desktop host's src/video.rs, compiled in (see src/lib.rs).
-ogg = "=0.9.2"
-oxideav-theora = "=0.0.12"
-oxideav-core = "=0.1.41"
+# MGV1 movies (Ogg/Theora), upstream's shared decoder.
+cmvs-video = { path = "../cmvs-video" }
 cmvs-native = { path = "../cmvs-native" }
 ab_glyph.workspace = true
 encoding_rs.workspace = true

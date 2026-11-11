@@ -473,6 +473,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                                 scene: &mut scene,
                                 images,
                                 camera: Some(&mut camera),
+                                messages: None,
                             }
                         })
                     } else {
