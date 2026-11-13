@@ -38,7 +38,7 @@ cargo run -p cmvs-mobile --bin cmvs-mobile-run -- <game> --font <font.ttc> --fac
 
 ## Syncing upstream
 
-Merge upstream `main` into `mikage` (last merged: upstream c973b71, 2026-11-11). The fork's changes outside `crates/cmvs-mobile` are small on purpose; conflicts should stay in `crates/cmvs-audio/src/native.rs` and `Cargo.toml`, `profile.rs`, `dispatch.rs`, `runner.rs`, `message.rs`, `message/auxiliary_layout.rs`, `image.rs`, `movie.rs` and `runner/save.rs`. Since 8da1d46 the fork adds no commands of its own: upstream's research handlers cover what it used to add, and are enabled per profile by `variant=` declarations, whose evidence document must name the bound exe hash and each command (`tests/profile_variant.rs`).
+Merge upstream `main` into `mikage` (last merged: upstream 34fdb7e, 2026-11-13). The fork's changes outside `crates/cmvs-mobile` are small on purpose; conflicts should stay in `crates/cmvs-audio/src/native.rs` and `Cargo.toml`, `profile.rs`, `dispatch.rs`, `runner.rs`, `message.rs`, `message/auxiliary_layout.rs`, `image.rs`, `movie.rs` and `runner/save.rs`. Since 8da1d46 the fork adds no commands of its own: upstream's research handlers cover what it used to add, and are enabled per profile by `variant=` declarations, whose evidence document must name the bound exe hash and each command (`tests/profile_variant.rs`).
 
 ## Tested
 
