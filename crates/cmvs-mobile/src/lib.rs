@@ -1,6 +1,6 @@
 //! The C interface for app hosts: `platform/ios/include/cmvs_mobile.h`.
 //!
-//! A session is a [`session::Session`]: the engine's `Startup` with fonts, input,
+//! A session is a [`session::Session`]: the engine's `Runtime` with fonts, input,
 //! a pulled audio mixer and wgpu presentation into the host's view. The host steps
 //! it once per display frame. Every entry point catches panics and reports them as
 //! errors; all but the `cmvs_audio_*` calls belong on the thread that opened the

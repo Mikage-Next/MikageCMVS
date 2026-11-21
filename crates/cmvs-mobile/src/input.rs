@@ -1,7 +1,7 @@
 //! Host input (Windows virtual-key codes and a pointer in surface pixels) mapped to
 //! the CMVS input-code table, the way cmvs-desktop's `game_input` maps winit events.
-use cmvs_core::input::{ActionInput, CodeInput, KeyBindings};
-use cmvs_core::viewport::Viewport;
+use cmvs_core::host::input::{ActionInput, CodeInput, KeyBindings};
+use cmvs_core::render::viewport::Viewport;
 use std::collections::BTreeSet;
 
 /// The logical screen every verified build draws.

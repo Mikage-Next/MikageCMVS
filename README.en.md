@@ -2,11 +2,26 @@
 
 [简体中文](README.md) | English
 
-A **Rust** reimplementation of Purple SOFTWARE's CMVS engine.
+A **Rust** reimplementation of Purple SOFTWARE's CMVS/CVNS engine.
 
 ## Demos
 
 <table>
+  <tr>
+    <th colspan="2">Akiiro Renka (CVNS)</th>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/aki_switch.webp" alt="Akiiro Renka on Switch" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/aki_vita.webp" alt="Akiiro Renka on PS Vita" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Switch (Ryujinx)</strong></td>
+    <td align="center"><strong>PS Vita (Vita3K)</strong></td>
+  </tr>
   <tr>
     <th colspan="2">Amatsutsumi</th>
   </tr>
@@ -65,45 +80,26 @@ A **Rust** reimplementation of Purple SOFTWARE's CMVS engine.
 
 ## Getting Started
 
-Requires **Rust 1.89+ stable**. The `--offline` flag requires dependencies to be cached locally.
+Requires **Rust 1.90+ stable**. To play a game, see the [Running Guide](docs/guides/running.md).
+
+Inspect a startup script and run the tests:
 
 ```bash
-cargo run --offline -- "<game-directory>/data/pack/start.ps3"
-cargo test --offline
+cargo run --bin cmvs-inspect -- "game/data/pack/start.ps3"
+cargo test
 ```
 
-See the [Running Guide](docs/guides/running.md) for desktop previews, startup snapshot barriers, fonts, audio, and a separate user data directory. See the [CLI Guide](docs/guides/cli.md) for inspection tools.
+See the [CLI Guide](docs/guides/cli.md) for more tools.
 
 ## Platforms
 
-| Platform | Target |
-|---|---|
-| Windows / Linux / MacOS | Host |
-| iOS | aarch64-apple-ios |
-| Android | aarch64-linux-android, x86_64-linux-android |
-| Web | wasm32-unknown-unknown |
-| Switch | aarch64-switch |
-| PS Vita | armv7-sony-vita-newlibeabihf |
+See [Platforms](platforms/README.md) for targets, support status, and build instructions.
 
 ## Documentation and Development
 
-- [Current Status](docs/status.md)
-- [Game Archive](docs/games/README.md)
-- [Documentation Index and Archiving Rules](docs/README.md): find documentation by purpose.
-- [Architecture](docs/architecture.md) and [Workspace](docs/workspace.md): module responsibilities, dependencies, and the full set of validation commands.
-- [Research Guidelines](docs/research.md): evidence requirements and steps for adding support for a new game.
-- [Engine Profiles](docs/design/engine-profiles.md): gates for selecting command semantics by engine build.
-- [References and Licensing](docs/references.md): pinned commits, third-party dependencies, and reuse boundaries.
-
-Before submitting changes, run:
-
-```bash
-cargo fmt --check
-cargo test --offline
-cargo clippy --offline --all-targets -- -D warnings
-```
-
-Tests contain only synthetic data. After changing decoding algorithms, also validate against real samples kept outside the repository and an independent Python implementation. For changes involving backends or features, run the additional all-features checks described in [Workspace](docs/workspace.md).
+- [Documentation](docs/README.md): usage, APIs, formats, and backends.
+- [Game records](docs/games/README.md): support and validation scope.
+- [Architecture and checks](docs/architecture.md), [research guidelines](docs/research.md), and [references](docs/references.md).
 
 ## License
 

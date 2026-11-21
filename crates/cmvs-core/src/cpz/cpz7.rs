@@ -4,7 +4,7 @@
 //! All supported games use the same decoder with per-archive parameters.
 //!
 //! Reference: Darkness-TX
-use super::{ArchiveError, Entry, crypto, data_checksum};
+use super::{ArchiveError, Entry, LookupTable, crypto, data_checksum};
 use crate::FormatError;
 use std::{
     io::{Read, Seek, SeekFrom},
@@ -24,6 +24,28 @@ pub struct Cpz7Parameters {
     pub file_step_xor: u32,
     pub seed_add: u32,
     pub resource_seed_xor: u32,
+}
+
+impl std::str::FromStr for Cpz7Parameters {
+    type Err = FormatError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut fields = s.split(',');
+        let mut keys = [0; 4];
+        for key in &mut keys {
+            let v = fields
+                .next()
+                .ok_or(FormatError("expected exactly four CPZ7 keys"))?;
+            *key = match v.strip_prefix("0x") {
+                Some(hex) => u32::from_str_radix(hex, 16),
+                None => v.parse(),
+            }
+            .map_err(|_| FormatError("invalid CPZ7 key"))?;
+        }
+        if fields.next().is_some() {
+            return Err(FormatError("expected exactly four CPZ7 keys"));
+        }
+        Ok(keys.into())
+    }
 }
 
 impl From<[u32; 4]> for Cpz7Parameters {
@@ -59,8 +81,10 @@ pub struct Cpz7Layout {
 #[derive(Debug)]
 pub struct Cpz7Index {
     pub layout: Cpz7Layout,
+    pub(super) directories: Vec<(std::sync::Arc<[u8]>, u32)>,
     entries: Vec<Entry>,
-    entry_keys: Vec<(u32, u32)>,
+    lookup: LookupTable,
+    pub(super) entry_keys: Vec<(u32, u32)>,
     keys: crypto::Keys,
     pub(super) parameters: Cpz7Parameters,
     file_bytes: u64,
@@ -222,9 +246,15 @@ impl Cpz7Index {
                 return Err(FormatError("CPZ7 file count/length mismatch").into());
             }
         }
+        let lookup = LookupTable::from_entries(&entries, <[u8]>::to_vec);
         Ok(Self {
+            directories: directories
+                .into_iter()
+                .map(|dir| (dir.name, dir.count))
+                .collect(),
             layout,
             entries,
+            lookup,
             entry_keys,
             keys,
             parameters,
@@ -238,19 +268,8 @@ impl Cpz7Index {
 
     /// Basename lookup only; duplicate basenames require selecting an entry index.
     pub fn find(&self, name: &[u8]) -> Result<usize, FormatError> {
-        let mut matches = self
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.name == name);
-        let first = matches
-            .next()
-            .ok_or(FormatError("CPZ7 filename not found"))?
-            .0;
-        if matches.next().is_some() {
-            return Err(FormatError("ambiguous CPZ7 basename"));
-        }
-        Ok(first)
+        self.lookup
+            .find(name, "CPZ7 filename not found", "ambiguous CPZ7 basename")
     }
 
     /// First entry in archive order matching ASCII-folded query bytes.
@@ -259,17 +278,7 @@ impl Cpz7Index {
         if name.len() > 4096 || name.contains(&0) {
             return Err(FormatError("invalid CPZ7 lookup name"));
         }
-        let mut key = name.to_vec();
-        let mut at = 0;
-        while at < key.len() {
-            if matches!(key[at], 0x81..=0x9f | 0xe0..=0xfc) {
-                at += 2;
-            } else {
-                key[at] = key[at].to_ascii_lowercase();
-                at += 1;
-            }
-        }
-        Ok(self.entries.iter().position(|entry| entry.name == key))
+        Ok(self.lookup.lookup(name))
     }
 
     pub fn read_entry<R: Read + Seek>(
@@ -458,7 +467,7 @@ mod tests {
     use std::io::Cursor;
 
     fn fixture() -> Vec<u8> {
-        include_str!("../../../../tests/fixtures/cpz7-0.hex")
+        include_str!("../../tests/fixtures/cpz7-0.hex")
             .trim()
             .as_bytes()
             .as_chunks::<2>()

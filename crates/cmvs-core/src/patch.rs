@@ -8,16 +8,16 @@
 use crate::{FormatError, raster::RgbaImage};
 use std::error::Error;
 
-pub trait PatchFiles {
+pub trait PatchFiles: Send + Sync {
     /// A PS2A script replacing `name` (as scripts name it, e.g. `main.ps3`).
-    fn script(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
+    fn script(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error + Send + Sync>>;
     /// An image replacing `name` (as scripts name it, e.g. `cg_bg.pb3`), in a
     /// format `image::decode` reads, such as [`raw_image`].
-    fn image(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
+    fn image(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error + Send + Sync>>;
     /// Decoded pixels replacing those of `name`, as BGRA rows top down at the
     /// size of the game's own image (Longinus patches hook the copy of the
     /// decoded picture, so their files carry no header).
-    fn pixels(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn pixels(&self, name: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error + Send + Sync>> {
         let _ = name;
         Ok(None)
     }

@@ -1,109 +1,61 @@
 # 运行指南
 
-命令从项目根目录执行，需要 Rust 1.89+ stable。`--offline` 要求依赖已缓存。以下桌面参数组合目前以[《アマツツミ》PC 样本](../games/amatsutsumi/README.md)验证，游戏路径和字体路径请替换为本机路径。
+需要 Rust 1.90+ stable。请在仓库根目录执行，示例中的路径请换成实际路径。含空格的路径需加引号。`--offline` 要求依赖已缓存。游戏支持与平台构建见[游戏档案](../games/README.md)和[平台总览](../../platforms/README.md)。
 
-## 桌面预览
+## 桌面运行
 
-```bash
-cargo run --offline --release --features desktop --bin cmvs-desktop -- "<游戏目录>" --encoding shift-jis --user-data-dir "local/amatsutsumi/user-data" --audio record --font "C:/Windows/Fonts/msgothic.ttc"
+```sh
+cargo run --offline --release --features desktop --bin cmvs-desktop -- \
+  game --encoding shift-jis --font font.ttf --user-data-dir user-data
 ```
 
-默认在 0x2080/0x22b2 构建引擎存档快照；存档、读档与系统存档都写入 `--user-data-dir`，原游戏目录保持只读。快照点上存在尚无存档格式的状态时以错误停止，不写不完整镜像，范围见[剧情存档](#剧情存档)。
+- `--encoding` 必填。使用 `shift-jis`、`gbk`、`utf-8` 或 `auto`；自动判断有歧义时请指定实际编码。
+- `--font` 接受 OpenType 字体，TTC 用 `--font-face <索引>` 选面，默认 0。仅调试文字时，可以改用 `--record-text` 记录字形和显示时序。
+- `--user-data-dir` 指定游戏目录之外的可写目录，以保存剧情、系统进度和设置。
+- 关闭窗口退出。Esc 按游戏绑定处理。
 
-当前默认放行 `Presumed` 和 `Unreviewed`，分别使用 `--block-presumed`、`--block-unreviewed` 显式阻止；两项互不隐含。`Absent`、`NoOp` 始终停止。默认放行不代表语义已复核、处理器完整或游戏可玩。`Base`、`Inherited`、`Reviewed` 与具有有效登记证明的 `ContractEquivalent` 进入已有分派，证明要求不变。见 [M3](../design/command-contracts-m3.md)。
+完整选项可用 `cargo run --offline --features desktop --bin cmvs-desktop -- --help` 查看。
 
-| 选项 | 含义与限制 |
-|---|---|
-| `--encoding auto` | 从启动脚本文本区前256 KiB内的完整字符串推测 `shift-jis`、`gbk` 或 `utf-8`，启动时打印结果；纯ASCII、证据不足或无法可靠区分时停止并提示手动指定 |
-| `--encoding shift-jis` | 显式选择文本编码；另可选 `gbk` 或 `utf-8`，可用于覆盖自动判断。编码同时应用于标题/对话框、引擎文本扫描和字体解码 |
-| `--user-data-dir <目录>` | 独立用户目录：系统存档、剧情槽 `saveNNN.dat` 和用户设置的读写位置，见下文 |
-| `--continue-without-snapshot` | 研究用：不构建快照，只应用已核对的实时影响并继续；此后剧情存档不可用 |
-| `--skip-auto-resume` | 研究用：首次系统存档读取成功后清零游戏记录中登记的内存整数（本作为 2198），跳过启动自动读档；只对记录了该策略的游戏可用（目前仅本作），磁盘存档保持不变 |
-| `--profile <id>` | 研究用：显式选择引擎档案。默认按启动脚本、脚本包与 exe 的哈希自动识别，未登记的游戏会拒绝启动 |
-| `--block-unreviewed` | 阻止未复核命令；默认按基准语义放行并在首次使用时打印 `# UNREVIEWED` |
-| `--block-presumed` | 阻止仅有旧形状证据的 `Presumed`；默认放行并记录策略、分派尝试数及命令列表 |
-| `--font <字体>` | 用桌面 OpenType 后端显示文字；字体路径由用户提供，与原版 GDI 有像素差异 |
-| `--audio record` | 仅记录音频请求，不发声 |
+## 音频与图形
 
-未指定字体且未启用 `--record-text` 时保留文字输出屏障；`--record-text` 只记录字形。关闭窗口可退出；活动游戏中的 Esc 按游戏动作绑定处理。`--exit-after <秒>` 可做有界运行，`--save-frame <新文件.png>` 可导出退出时的帧。
+| 功能 | 构建特性 | 运行参数 |
+|---|---|---|
+| 原生音频 | `desktop,audio-output` | `--audio native` |
+| GPU 渲染 | `wgpu-renderer` | `--renderer wgpu` |
+| 原生音频与 GPU | `wgpu-renderer,audio-output` | `--renderer wgpu --audio native` |
 
-自动识别使用严格解码和文本特征启发式，不能保证所有汉化补丁或混合编码脚本都能正确识别。省略 `--encoding` 仍会报错；`--font` 接受最终识别或显式选择的任一编码。
-
-## CHRONOCLOCK研究运行
-
-已验证的《クロノクロック》PC样本可用以下参数启动原生软件绘制窗口及音频。它仍依赖旧推定和未复核命令的默认放行，不能视为全部命令已复核；样本身份与验证范围见[游戏档案](../games/chronoclock/README.md)。
-
-```bash
-cargo run --offline --release --features desktop,audio-output --bin cmvs-desktop -- "<游戏目录>" --encoding shift-jis --user-data-dir "local/chronoclock/play-user" --audio native --font "C:/Windows/Fonts/msgothic.ttc"
-```
-
-使用独立用户目录保留本次进度。正常剧情支持本作文字v2快照，可从工具栏打开存读档；无需使用会禁用剧情存档的 `--continue-without-snapshot`。原生窗口已验证空槽保存、关闭、重启恢复及设置持久化；覆盖范围之外的特殊图像、活动场景效果快照仍显式拒绝。鉴赏缩略图列表由脚本禁止键盘导航，使用鼠标；侧栏导航和剧情键盘输入另有验证，不能据此声称整个鉴赏页支持纯键盘。
-
-## 原生音频
-
-```bash
-cargo run --offline --release --features desktop,audio-output --bin cmvs-desktop -- "<游戏目录>" --encoding shift-jis --user-data-dir "local/amatsutsumi/user-data" --audio native --font "C:/Windows/Fonts/msgothic.ttc"
-```
-
-普通 Windows 桌面权限下已验证品牌音效和标题 BGM；受限沙箱中相同构建曾以 `0xc0000008` 退出。设备检查、源消费时钟与验证边界见[原生音频](../backends/audio-output.md)。其他平台和完整剧情音轨仍需独立实测。
+默认记录音频请求并使用 CPU 渲染。设备要求和后端限制见[音频输出](../backends/audio-output.md)与 [wgpu 后端](../backends/wgpu.md)。
 
 ## 独立用户目录
 
-`--user-data-dir` 的目录必须位于原游戏根之外。用户 `system.dat` 优先，缺失时才从原游戏只读引入 CSS1 模板；支持重复保存、`system.bak` 与会话锁。损坏文件明确报错，不自动恢复备份。原游戏缺少 `save` 目录时按无存档启动，不创建原游戏目录；无 CSS1 模板时可从完整运行状态首次创建系统存档，写入仍须指定独立用户目录。
+| 引擎 | 系统档 | 设置 |
+|---|---|---|
+| CMVS | `system.dat` | `cmvs.cfg` |
+| CVNS | `save000.dat` | `cvns.cfg` |
 
-单次实验可改用 `--system-save-output "local/amatsutsumi/completed-system.dat"`，只允许游戏目录之外的新文件、拒绝覆盖。该选项与 `--user-data-dir` 互斥。不配置这两种方式时保留 `0x2129` 系统存档写入屏障，剧情存档报错。细节见 [CSS1](../formats/system-save-format.md)。
+系统档和设置优先读取用户目录，缺失时回退到游戏原文件。指定用户目录后，剧情槽也从该目录读取，设置在正常退出时保存。迁移已选字体时请一并复制 `font-faces/`。同一用户目录同时只支持一个会话。备份、恢复及提交规则见[系统存档](../formats/system-save-format.md#独立用户目录)。
 
 ## 剧情存档
 
-脚本命令 `0x22b6` 写 `saveNNN.dat`、`0x22b5` 读档，与原版同样：覆盖 0..949 号槽前把旧文件保存为 `save999.dat`，读 0..949 号槽前把当前快照保存为 `save998.dat`，每次写槽同时写 `system.dat`。没有原版的覆盖确认对话框。标签时间使用 UTC（标准库不含本地时区），缩略图来自核心渲染帧，不含桌面字体绘制的文字。
+从支持的游戏菜单或快捷键存读档。导入原版存档时，可将系统档和所需剧情槽复制到用户目录，再从游戏菜单载入。若系统档启用了启动自动读档，也需复制对应的剧情槽。
 
-游戏内工具栏（画面上方）的クイックセーブ/クイックロード、セーブ/ロード画面由自动回调调度运行，点击即可存读档；是否先弹出确认对话框取 `cmvs.cfg` `[SYSTEM_INFO]` 的 DLG_SAVE/DLG_LOAD（原版优先读注册表，此处不读），使用独立用户目录时，已实现的游戏内修改可在桌面正常退出时保存，见下节。F1..F12 会报告给脚本。剧情文字等待时滚轮上打开回看（需 `--font` 才能看到文字）：滚轮或拖动滚动，点击头像重播语音，点击文字并确认后跳回该句，右键或「もどる」关闭。本机 `system.dat` 记录了自动读档时（本作整数 2198 非零），启动后恢复对应槽，用户目录需要包含该槽文件。无窗口验证见 `external_in_game_menus_save_and_load`；原生窗口中的界面操作尚未实测。快照点存在下列状态时明确报错：超出已支持字号范围的文字字形等；五条结局路线的固定重放中均未出现。换图进行中支持快照，读档后显示完整新图，不恢复换图进度。读档后遮罩转场从头开始，条带转场按原版直接成为完成状态。格式与读档效果见 [CSV2](../formats/save-format.md) 和[引擎快照](../formats/snapshot-format.md)。
+CVNS 系统档占用 `save000.dat`，首个剧情槽使用 `save001.dat`。导入原版 CVNS 剧情快照目前限于 `cvns-20090203` 的 `CSP1` v3。备份槽、格式和恢复边界见[存档格式](../formats/save-format.md)，实测范围见[游戏档案](../games/README.md)。
 
-## 研究与检查
+## 诊断与检查
 
-脚本 trace、资源检查和导出示例见 [CLI 指南](cli.md)。桌面、输入和字体的具体支持分支见[后端文档](../README.md)，当前结局路线与鉴赏停点见[游戏档案](../games/amatsutsumi/README.md)。原始文件保持只读，真实输出放游戏目录外并避免进入 Git。
+| 选项 | 用途 |
+|---|---|
+| `--exit-after <秒>` | 到时间后正常退出 |
+| `--save-frame <新文件.png>` | 导出最后成功呈现的完整逻辑帧 |
+| `--continue-without-snapshot` | 仅应用快照点的实时效果，停用剧情存档 |
+| `--skip-auto-resume` | 临时跳过启动自动读档，要求已识别游戏及其自动读档条件 |
+| `--profile <档案ID或游戏别名>` | 显式指定引擎档案 |
+| `--block-presumed` / `--block-unreviewed` | 分别阻止仅有推定证据或尚未复核的命令 |
 
+默认允许推定和未复核命令，缺失及空操作命令始终停止。命令状态见[引擎档案](../design/engine-profiles.md)，资源检查、trace 和探针见 [CLI 指南](cli.md)。
 
-## 设置保存与重启
+## 游戏内对话框
 
-桌面选择的字体名由Unicode管理，不再要求能转为Shift-JIS；例如“萝莉体-DDC.yolan”可直接加载。用户目录内的 `font-faces/` 保存UTF-8名称，游戏配置和旧存档的固定长度字段保存稳定标识；迁移用户存档时应同时保留该目录。未指定用户目录时名称映射仅在当前会话有效。旧Shift-JIS字体名继续支持，缺失或损坏的映射、无法加载的字体会回退默认字体。
+存档评论、CVNS 退出确认和取色器共用游戏内面板。评论可在桌面直接输入，Web、移动端和主机可选择输入框后使用平台键盘。评论支持全角和半角字符，长度上限由游戏脚本决定。选「OK」提交，选「Cancel」保留原评论。对话框打开时脚本暂停。
 
-所选字体仅缺个别字符或可绘制轮廓时，按字符回退到 `--font` 提供的默认字体。字宽测量与绘制使用同一个字体选择规则，避免缺字直接终止游戏。默认字体本身也缺字时可显示其缺字字形，故仍应提供覆盖游戏文字的默认字体。
-
-提供 `--user-data-dir` 时，优先读取该目录的 `cmvs.cfg`；首次没有用户配置时，从原游戏的只读配置开始。桌面正常退出（含诊断倒计时退出）保存当前已实现的设置，生成或替换用户 `cmvs.cfg`，旧配置留在 `cmvs.cfg.bak`。VM错误退出不自动保存。没有独立用户目录或使用单次 `--system-save-output` 时不写配置。无窗口库调用方需显式调用 `Startup::save_preferences`，Drop不执行可能失败的保存。
-
-目前保存音量与声音开关、语音压低BGM、文字速度/描边/粗体/显现、语音停止方式、未读停止、自动送页、后台运行、画面效果、保存/读取确认及光标自动隐藏。原配置中的未知键、其他设置和原始文本字节保留。全屏与比例偏好使用 `[CMVS_RS_DESKTOP]` 的 FULLSCREEN/ASPECT_MODE/ASPECT_SCALING，适配当前单显示器无边框全屏；不改原版D3D适配器配置。系统页绘制模式沿用原版 `[GRAPHIC_CONFIG]` 的 ASPECT_RATIO_FILTER（0为线性、1为点采样），桌面按此选择软件双线性或最近邻缩放。`--font` 文件作为内置缺省面ＭＳ ゴシック；游戏内「フォント選択」在Windows上打开系统字体对话框，在Linux上打开Zenity日文字体族列表，所选面写入 `[MESSAGE_INFO]` 的 FONT 并从系统字体目录载入，启动时找不到配置面则换回缺省。Linux需要安装fontconfig、zenity与日文字体；macOS 使用系统独立字体族选择窗口；其他平台的字体对话框尚未实现。
-
-已载入CSS1模板时，正常退出也保存持久变量，包含游戏脚本管理的背景动画和窗口透明度；尚未载入模板时只保存INI，不生成猜测的system.dat。各文件单独使用临时文件替换及备份，共用用户目录会话锁；INI与CSS1不是跨文件事务，后一步失败可能已有前一步保存成功。CSS1损坏、配置超限/含NUL，或缺少主文件而有备份时明确报错，需自行恢复，不静默覆盖。配置限制1MiB，拒绝NUL/UTF-16文件。
-
-真实设置页修改后的INI与CSS1重启回读已验证；原生窗口实际退出与重启交互、完整重置/放弃仍待补测。
-
-无原版 `system.dat` 模板时，已接入从完整运行状态首次构建CSS1的路径；正常退出须已执行启动系统存档读取（缺失也算完成）。未知变量、损坏存档和读取错误仍显式报错。该新增路径已通过端到端合成回归，尚未进行真实游戏的首次启动/保存/重启实测，见[CSS1说明](../formats/system-save-format.md#无模板首次创建2026-10-31)。
-
-系统页“窗口大小初始化”在窗口模式按需请求1280×720；在全屏模式只更新未来窗口尺寸，切回窗口时请求该尺寸，当前全屏保持不变。该尺寸记录仅存在于当前会话；原生物理尺寸与DPI效果尚未人工复测，不代表整套设置已恢复默认。
-
-## 选择图形后端
-
-桌面默认 `--renderer cpu`。使用 `--features wgpu-renderer` 构建后可显式传入 `--renderer wgpu`，在 GPU 上执行场景合成、影片缩放和窗口呈现；初始化失败明确报错。CPU-only 构建保留原有运行方式。截图、依赖、限制与检查命令见 [wgpu 后端](../backends/wgpu.md)。
-
-## macOS
-
-Apple Silicon 本机构建及 iOS 真机/模拟器构建入口另见 [Apple players](../../platforms/apple/README.md)，其中记录了实际验证范围与当前限制。
-
-安装 Rust stable 与 Xcode Command Line Tools（`xcode-select --install`）。Apple Silicon 与 Intel 均使用本机默认 Rust target；首次构建需要联网获取依赖。
-
-```bash
-cargo build --release --features desktop,audio-output --bin cmvs-desktop
-cargo run --release --features desktop,audio-output --bin cmvs-desktop -- "/path/to/game" --encoding shift-jis --user-data-dir "$HOME/Library/Application Support/cmvs-rs/game" --audio native --font "/path/to/JapaneseFont.ttf"
-```
-
-请提供实际安装且覆盖游戏日文的 OpenType 字体路径；TTC 可用 `--font-face` 选择索引。游戏内字体选择使用系统自带 osascript/AppKit，取消保留当前设置；选择窗口独立显示，期间 VM 暂停。字体发现包含 `/System/Library/Fonts`、其 `Supplemental` 子目录、`/Library/Fonts` 和 `~/Library/Fonts`。宿主仍会验证选中字体能否由 OpenType 后端载入，不支持的系统字体格式不能用于显示。
-
-GPU 路径可用 `--features wgpu-renderer,audio-output` 与 `--renderer wgpu`，依赖已启用 Metal。CI 配置检查 Apple Silicon / Intel 的构建和原生服务单元测试；尚未在本次开发环境执行 macOS 构建、窗口、声音、字体选择或 Metal 实机验证，也未提供 `.app` 打包、签名及公证。
-
-
-## 存档评论编辑框
-
-已检查旧构建的存档 EDIT 使用原生文字输入框：Windows 内置模态窗口，Linux 使用 Zenity（需安装 `zenity`），macOS 使用系统自带 `/usr/bin/osascript` 的输入对话框，无额外依赖。Linux 的 X11 窗口传递父窗口标识；Wayland 和 macOS 对话框独立显示，期间 VM 暂停。
-
-确认后沿用已核对构建的全角过滤及空输入回退规则，取消不更改存档评论。Linux/macOS 在确认时按字符边界截取至脚本给定的全角容量，保留前后空格；编码及存档字段容量仍由核心检查。后端启动失败会报错，不会伪装成取消。协议与启动参数测试可在 Windows 上运行；本次尚未在 Linux/macOS 实测弹窗、输入法、焦点或原生构建。
+macOS 构建与系统字体选择见 [Apple players](../../platforms/apple/README.md)及[字体后端](../backends/font-output.md)。

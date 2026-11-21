@@ -19,7 +19,7 @@ extern "C" fn print_log(
     eprintln!("[{label}] {message}");
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut args = std::env::args().skip(1);
     let usage = "usage: cmvs-mobile-run <game-dir> --font <file> [--face <name>] [--save-dir <dir>] \
                  [--seconds <n>] [--tap-every <ms>] [--tap-at <x>,<y>] [--click <ms>:<x>,<y>]... [--wheel <ms>:<notches>]... [--close <ms>]... \

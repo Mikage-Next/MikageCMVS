@@ -1,107 +1,150 @@
-# CLI 检查指南
+# CLI 指南
 
-所有命令从项目根目录执行。这里使用 `<游戏目录>` 和 `<新输出文件>` 作为占位符，请替换后运行。工具只支持已核对的格式分支，不能据解析成功推断整款游戏可运行。当前真实样本验证来自[《アマツツミ》](../games/amatsutsumi/README.md)。
+在仓库根目录运行。把示例路径换成实际路径，含空格时加引号。下面的命令要求依赖已缓存，首次构建可去掉 `--offline`。
 
-每个工具均支持 `-h` / `--help`，帮助输出到标准输出并以0退出；参数错误输出到标准错误并以非零状态退出，同时提示帮助入口。路径含空格时使用引号。导出文件必须不存在，`cmvs-probe --out` 也必须指定新目录；桌面端独立用户目录中的存档和配置则会正常更新。
-
-```bash
-cargo run --offline --bin cmvs-cpz -- --help
-cargo run --offline --features desktop --bin cmvs-desktop -- --help
-cargo run --offline --features audio-output --bin cmvs-audio -- --help
-```
-
-`cargo run` 的 `--` 用于分隔Cargo选项与工具参数。`cmvs-desktop`、`cmvs-mgv` 需要 `desktop` feature，`cmvs-audio` 需要 `audio-output`；`cmvs-probe` 使用 `-p cmvs-probe` 运行。
+`cargo run` 的 `--` 后是工具参数。把示例中 `--` 后的参数换成 `--help`，可查看工具的完整用法。各二进制及构建特性见[工具清单](../../crates/cmvs-cli/README.md#binaries)，播放游戏见[运行指南](running.md)。
 
 ## 脚本与执行跟踪
 
-```bash
-cargo run --offline -- "<游戏目录>/data/pack/start.ps3"
-cargo run --offline -- "<游戏目录>/data/pack/start.ps3" --payload "<新输出文件>"
-cargo run --offline --bin cmvs-disasm -- "<游戏目录>/data/pack/start.ps3"
-cargo run --offline --bin cmvs-trace -- "<游戏目录>/data/pack/start.ps3" --steps 10000
+```sh
+cargo run --offline --bin cmvs-inspect -- game/data/pack/start.ps3
+cargo run --offline -p cmvs-disassembler -- game/data/pack/start.ps3
+cargo run --offline --bin cmvs-trace -- game/data/pack/start.ps3 --steps 10000
 ```
 
-默认 `cmvs-inspect` 检查 PS2A 头部、分段和解码结果，文本保留原始字节并以十六进制显示。`--payload` 输出不含原始头部，拒绝覆盖。线性反汇编不跟随分支；trace 有步数上限，未知状态和未实现命令显式停止。
+- `cmvs-inspect` 查看 PS2A/PSS0 的头部、分段和原始文本字节。用 `--payload <新文件>` 导出解码负载。
+- `cmvs-disassembler` 按指令顺序反汇编并统计系统命令。兼容命令 `cmvs-disasm` 接受相同参数。
+- `cmvs-trace` 在步数预算内执行脚本。可用 `--profile <档案ID或游戏别名>` 显式指定档案。以归档为输入时，用 `--script <条目名>` 选入口，用 `--script-archive <归档>` 启用脚本切换。
 
-完整启动研究示例：
+导出译文表后，在需要修改的行末添加一个制表符和译文。前三列依次为段名、原始十六进制字节偏移和原文。省略第四列保留原文，第四列留空表示替换为空串。导入时校验源脚本 SHA-256。数据段译文须与原文编码后的字节数相同。
 
-```bash
-cargo run --offline --bin cmvs-trace -- "<游戏目录>/data/pack/start.ps3" --bootstrap --save-dir "<游戏目录>/save" --system-save "<游戏目录>/save/system.dat" --script-archive "<游戏目录>/data/pack/script.cpz" --record-platform "<游戏目录>" --continue-without-snapshot --frame-ms 16 --steps 1000000
+```sh
+cargo run --offline -p cmvs-disassembler -- scene.ps2 --export-text scene.tsv --source-encoding shift-jis
+cargo run --offline -p cmvs-assembler -- script import-text scene.ps2 scene.tsv edited.ps2 --target-encoding shift-jis
 ```
 
-trace先识别引擎档案：输入脚本（或`--script`归档）、`--script-archive`及`--record-platform`根目录exe参与哈希比对，以`# engine profile`和`# profile evidence`打印。未登记的游戏或合成脚本需显式`--profile <id>`。命令先经闸门：Base、Inherited、Reviewed与带有效登记证明的ContractEquivalent进入现有分派，Absent/NoOp总是报错。Presumed、Unreviewed默认放行，分别用`--block-presumed`、`--block-unreviewed`显式阻止；未复核命令记录首次使用。派生档案在退出时打印各来源已放行分派尝试数、契约/研究命令列表及策略（含等待重试和未实现处理器的尝试，不等于完成或覆盖率），闸门错误以非零退出码结束。完整迁移与证明失效规则见[M3](../design/command-contracts-m3.md)。
+跟踪启动流程时，可载入启动配置、脚本包和存档元数据，并推进虚拟帧时钟：
 
-`--bootstrap` 应用已核对的初始化；`--save-dir` 只读扫描剧情槽，不会自动推断 `--system-save`。记录平台请求不创建窗口，帧时间必须显式提供；省略 `--frame-ms` 时冻结时间并在等待处停止。增加步数不能绕过未知命令、快照或完整恢复屏障。VM 地址及语义见[本作证据](../games/amatsutsumi/vm-semantics.md)。
-
-## 引擎档案
-
-已有IDA导出可用 `python -I tools/profile_compare.py BASE.json DERIVED.json --group-differences` 聚合共享差异函数，或在选项后列出命令号（如 `0x2140 0x215d`）限定范围。输出包含两边exe哈希、架构与深度；仅作人工复核排序，不生成档案或更改状态。
-
-分组只沿整个自身函数体对齐的调用边展开，遇到不同函数体就停止，不断言其后代相同。它仅显示能配对的处理函数；无命令号时依据自动比较的Unreviewed列表，因此可能包含已人工Reviewed的命令。保守数据、间接调用和深度限制仍须结合普通报告及 `--explain` 检查。
-
-```bash
-cargo run --offline --release --bin cmvs-profile -- identify "<游戏目录>"
-cargo run --offline --release --bin cmvs-profile -- identify "<游戏目录>" --profile cmvs-20160201
-cargo run --offline --release --bin cmvs-profile -- table "<游戏目录>" --id <新档案> [--base cmvs-20160201]
-cargo run --offline --release --bin cmvs-profile -- show cmvs-20150405
+```sh
+cargo run --offline --bin cmvs-trace -- game/data/pack/start.ps3 \
+  --bootstrap --script-archive game/data/pack/script.cpz \
+  --save-dir game/save --system-save game/save/system.dat \
+  --record-platform game --frame-ms 16 --steps 1000000
 ```
 
-`identify` 只读哈希启动脚本、脚本包和 exe，打印封包/脚本签名、每个 exe 的 PE 时间戳、链接器版本、switch 位置与处理函数/空操作数量；exe 已登记时与内嵌表逐项比对，不一致即报错。最后报告档案选择结果；未登记的游戏以非零退出码结束，CVNS/PVNS 特征另行提示为"不支持的家族"。`table` 从游戏根目录的 exe 生成新档案表到标准输出：不带 `--base` 时有处理函数的命令记为 `base`，带 `--base` 时记为 `unreviewed`；生成的表要放进 `crates/cmvs-core/profiles/`、登记游戏记录并重新构建才会生效。`show` 汇总内嵌档案的状态统计和非基准命令列表。设计与普查见[引擎档案层](../design/engine-profiles.md)。
+trace 默认停在快照点。仅需继续观察执行时可加 `--continue-without-snapshot`。脚本回调时钟由 `--virtual-tick` 单独指定。命令状态和阻止策略见[引擎档案](../design/engine-profiles.md#选择与闸门)。
+
+### 编辑脚本项目
+
+```sh
+cargo run --offline -p cmvs-disassembler -- scene.ps2 --profile asukimi --export scene.project
+cargo run --offline -p cmvs-assembler -- script assemble scene.project edited.ps2
+```
+
+`cmvs-script-v1` 是 UTF-8 制表符分隔文件。首行依次记录容器、版本、密钥、保留字段、压缩方式、档案、字符串编码和原代码段、数据段字节数。数值采用十六进制。汇编默认沿用原压缩方式，可用 `--compressed` 或 `--uncompressed` 覆盖。
+
+- 每行 `code` 定义一个符号和一条指令。保留原指令的符号，给新增指令起唯一的名字。操作数 `@名称` 指向指令，`&名称` 和 `%名称` 分别引用 16 位和 32 位标签索引，`$名称` 引用文本。行尾 `#` 列是注释。
+- `entry` 指向入口指令。`label` 行按出现顺序建立标签表。`text` 行按顺序拼接字节，`\x00` 表示终止符，共享后缀可单独引用。`data` 行须保留原偏移与字节数，可用 `append<Tab>十六进制字节` 在数据段末尾追加。
+- 移动代码后，汇编器按档案处理回调。若报告动态回调，先将产生目标地址的常量写成 `@名称`，或调整运行时计算，再给注册指令添加 `runtime-pc` 列（位于注释前）。改变代码布局后，旧存档中的指令地址可能失效。
 
 ## 归档与资源
 
-```bash
-cargo run --offline --bin cmvs-cpz -- "<游戏目录>/data/pack/script.cpz"
-cargo run --offline --bin cmvs-cpz -- --list "<游戏目录>/data/pack/script.cpz"
-cargo run --offline --bin cmvs-cpz -- --script "<游戏目录>/data/pack/script.cpz" main.ps3
-cargo run --offline --bin cmvs-cursor -- "<游戏目录>/data/icon/01.cur"
-cargo run --offline --bin cmvs-pb3 -- "<PB3 文件>" --rgba "<新输出文件>"
-cargo run --offline --bin cmvs-cmv -- "<游戏目录>/data/video/op.cmv"
-cargo run --offline --release --features desktop --bin cmvs-mgv -- "<游戏目录>/data/video/op.mgv" --check-frames
+```sh
+cargo run --offline --bin cmvs-cpz -- --list game/data/pack/script.cpz
+cargo run --offline --bin cmvs-cpz -- --extract game/data/pack/script.cpz main.ps3 main.ps3
 ```
 
-`cmvs-cpz` 支持 CPZ3、CPZ5（打包模式 5～9）、CPZ6 模式 1 和 CPZ7（资源模式 0/1）。默认检查头部，`--list` 列目录，`--extract` 提取资源，`--script` 解码 PS2A 容器；CPZ3 不需要启动参数，列目录和提取前始终验证索引密文校验值。
+`cmvs-cpz` 只传路径时查看归档头部，`--script <归档> <条目名>` 查看解码后的脚本。条目名须为 ASCII。列表会显示资源校验和；提取和脚本检查也不验证资源校验和。
 
-读取 CPZ5/7 时自动查找封包同目录的 `start.ps3`（CPZ5 也查找 `start.ps2`），可用 `--start-script <路径>` 覆盖；CPZ7 另支持 `--keys <k0,k1,k2,k3>`。CPZ5 可用 `--packing-mode <5..9>` 指定模式，无启动设置时按索引结构自动识别；CPZ7 未找到设置时使用零参数。CPZ5/7 始终验证头部及索引，CLI 提取不验证资源校验值。PB3 的导出为顶向下 RGBA；CUR 支持单图 8/32 位 BI_RGB，`--planes <新文件>` 导出 AND/RGB 平面（不含 alpha），`--rgba <新文件>` 导出 straight RGBA，遇到旧式反色像素显式报错。具体布局和限制见[格式目录](../README.md)。
+CPZ5 自动查找相邻的 `start.ps3` 或 `start.ps2`，CPZ7 查找 `start.ps3`。没有启动脚本时，CPZ5 从索引推断模式，CPZ7 使用零参数。可在操作模式前指定 `--start-script`、`--packing-mode`（CPZ5）或 `--keys`（CPZ7）。支持范围见 [CPZ 格式](../formats/cpz-format.md)。
+
+用列表中的条目编号将编辑好的文件写入新包。以下示例将 PNG 编为 PB3B type 1 并替换第 0 项。
+
+```sh
+cargo run --offline -p cmvs-assembler -- pb3 encode edited.png edited.pb3
+cargo run --offline -p cmvs-assembler -- cpz replace chip.cpz new.cpz 0 edited.pb3
+```
+
+六种 CPZ 都支持按条目编号替换、导出清单和按清单新建。导出目录中的 `archive.tsv` 保留目录边界、重名条目和原始名称；名称按 Shift-JIS 或 `\xNN` 转义，输入路径相对于清单，解析后须位于清单目录内。CPZ3/5/6 的运行时文件名限 63 字节。
+
+```sh
+cmvs-assembler cpz export script.cpz archive --profile realive
+cmvs-assembler cpz pack archive/archive.tsv new.cpz --profile realive
+```
+
+手写清单时，首行为 `cmvs-cpz-v1<Tab>cpz7`，文件行为 `file<Tab>名称<Tab>路径`。目录型封包用 `dir<Tab>目录名` 开组。CPZ5 可用 `mode` 指定 5～9（默认 9），CPZ5/7 可用 `encryption` 指定 0 或 1（默认 1）。CPZ7 的 `parameters` 行按登记顺序填写四个十六进制整数，默认全零。各列用制表符分隔。独立的 CPZ7 文件可在导出或替换时用 `--keys k0,k1,k2,k3` 指定四个十进制或 `0x` 前缀的参数。`pack` 回读全部明文，`replace` 回读替换条目，加 `--verify-all` 也会解密比较未改条目。
+
+CVNS 静态 PB2 图像可导出为 PNG，再用 `--type 1|2` 和 `--bpp 24|32` 指定写回格式。默认写成 type 2、32 位。保留源格式时指定原类型和位深，24 位要求所有像素完全不透明。type 3/4 的 JBP1 源图也可导出并转换为这两种无损格式。
+
+```sh
+cargo run --offline -p cmvs-assembler -- pb2 decode logo.pb2 logo.png
+cargo run --offline -p cmvs-assembler -- pb2 encode logo.png edited.pb2 --type 1 --bpp 24
+```
+
+CVNS 的 MSK0 转场遮罩和字形图集可导出为 8 位灰度 PNG。编辑时保留图集尺寸和字格位置，每个灰度值对应一个原始强度值。
+
+```sh
+cargo run --offline -p cmvs-assembler -- msk decode filter.msk filter.png
+cargo run --offline -p cmvs-assembler -- msk encode filter.png edited.msk
+```
+
+PB2 动画与命名部件用 PNG 集合和 `images.tsv` 编辑。PB3 差分图用底图的解码结果和引用名写回。CUR 项目逐行保存 XOR/AND 原始字节，表头记录位深和热点，调色板保留原始顺序。
+
+```sh
+cmvs-assembler pb2 export motions.pb2 frames
+cmvs-assembler pb2 pack frames/images.tsv new.pb2
+cmvs-assembler pb3 encode composite.png new.pb3 --type 8 --base base.png --reference base
+cmvs-assembler cursor decode pointer.cur pointer.tsv
+cmvs-assembler cursor encode pointer.tsv new.cur
+```
+
+### 整包增量构建
+
+```sh
+cmvs-assembler build export game project
+cmvs-assembler build extract project 42 project/edit.png --source game
+cmvs-assembler build assemble project new-game --source game
+```
+
+在 `project/game.tsv` 中按文件名和条目号找到目标资源，上例以 42 为例。将对应 `asset` 行末列的 `-` 改为 `edit.png`。PB2 集合填写 `images.tsv`，清单及其引用的图片都须位于项目内。CUR 填写光标表，脚本可填写已汇编的容器或由 `cmvs-disassembler --export` 导出的项目。无专用编码器的资源可填写替换文件。底图改动时保留未编辑覆盖层的原始差分；为覆盖层指定 PNG 会基于最终底图重算差分。删除项目的 `cache/` 可重新编码全部编辑项。
+
+源目录提供游戏数据、配置、运行库、可执行文件及启动所用的系统存档模板（存在时）。构建按清单校验源文件 SHA-256，在新目录发布结果。若原始数据未被识别，可在导出时指定 `--profile`。 [档案选择](../design/engine-profiles.md)
+
+| 工具 | 用法 |
+|---|---|
+| `cmvs-pb3` | 检查 PB3B；`--rgba <新文件>` 导出顶向下的 RGBA |
+| `cmvs-cursor` | 检查 CUR；`--rgba <新文件>` 导出 RGBA，带反色像素时可用 `--planes <新文件>` |
+| `cmvs-cmv` / `cmvs-mgv` | 检查 CMV6 / MGV1；`--check-frames` 解码检查，`--frame 0 frame.png` 导出首帧 |
+| `cmvs-audio` | 检查 Ogg Vorbis、PCM WAVE、MV2X 或 CMV6 音轨；`--pcm <新文件>` 导出 PCM，构建时启用 `--features audio-output` |
 
 ## 存档
 
-```bash
-cargo run --offline --bin cmvs-save -- "<游戏目录>/save/save000.dat"
-cargo run --offline --bin cmvs-save -- --records "<游戏目录>/save/save000.dat"
-cargo run --offline --bin cmvs-save -- --vm-state "<游戏目录>/save/save000.dat"
-cargo run --offline --bin cmvs-save -- --visual-state "<游戏目录>/save/save000.dat"
-cargo run --offline --bin cmvs-save -- --section 0 "<游戏目录>/save/save000.dat" "<新输出文件>"
-cargo run --offline --bin cmvs-system-save -- "<游戏目录>/save/system.dat"
+```sh
+cargo run --offline --bin cmvs-save -- --records game/save/save000.dat
+cargo run --offline --bin cmvs-system-save -- game/save/system.dat
 ```
 
-CSV2 检查与解压不会恢复 VM，段导出拒绝覆盖；运行时存读档由 `Startup`/桌面在 `--user-data-dir` 下完成，`cmvs-trace` 不构建快照镜像。CSS1 的模板编码、可选输出与独立用户目录策略见[系统存档](../formats/system-save-format.md)，剧情恢复边界见[快照](../formats/snapshot-format.md)。
-`--vm-state` 检查保存的脚本名称、PC/栈、局部变量和主脚本内存布局，并逐项列出未安装的对象/宿主记录；活动公共脚本的PC没有提供对应图像时明确标为未验证。这是离线检查模型，工具不改写游戏或存档。
-`--visual-state` 检查已支持版本的文字、消息窗口、场景树、图像引用与绘制/帧动画负载，列出顶层资源名和窗口未解释状态字；不读取图像资源、不恢复引擎。已有显示字形、旋转轨道、复合/特殊图像或效果分支显式报错。核心 `VisualSnapshot::preview` 可另行通过调用者的图像源生成独立场景/消息宿主供离线渲染，完整限制见[快照格式](../formats/snapshot-format.md)。
+`cmvs-save` 检查 CMVS 的 CSV2 剧情档。可以用 `--vm-state` 验证 VM 字段和主脚本 PC，或用 `--visual-state` 检查支持的文字、窗口和场景记录。`--section <编号> <存档> <新文件>` 导出指定段。`cmvs-system-save` 检查 CSS1 系统档，可加 `--payload <新文件>` 导出负载。游戏内读档与 CVNS 支持范围见[运行指南](running.md#剧情存档)。
 
 ## 通用探针
 
-```bash
-cargo run --offline --release -p cmvs-probe -- --help
-cargo run --offline --release -p cmvs-probe -- "<游戏目录>" --out "<新输出目录>" --font "<字体文件>"
-cargo run --offline --release -p cmvs-probe -- "<游戏目录>" --out "<新输出目录>" --font "<字体文件>" --checks all --max-steps 800000000
-cargo run --offline --release -p cmvs-probe -- "<游戏目录>" --out "<新输出目录>" --font "<字体文件>" --checks R2,R3 --fork save --max-steps 800000000
-cargo run --offline --release -p cmvs-probe -- "<游戏目录>" --out "<新输出目录>" --font "<字体文件>" --manifest "<清单文件>" --checks P1,R2
-python -I tools/probe_matrix.py "<输出目录1>" "<输出目录2>" --markdown
+```sh
+cargo run --offline --release -p cmvs-probe -- game --out report --font font.ttf
 ```
 
-对任意已识别构建运行与游戏无关的检查，写出 `summary.json`（身份、能力、参数、清单使用情况，以及各检查的结果和判定等级）与 `events.jsonl`。`--help` 逐行列出全部检查 ID 及其含义，并标出默认运行的那几项。默认只运行静态检查（S1–S5）和启动检查（R1、D1），几秒即可完成；其余检查要玩剧情或整条路线，只在 `--checks` 中列出时运行，`--checks all` 运行全部。
+默认运行 S1–S5、R1 和 D1，生成 `summary.json` 与 `events.jsonl`。输出目录必须尚未存在，探针在其中创建独立用户目录。用 `--checks R2,R3` 选择检查，或用 `--checks all` 运行全部。完整路线可能耗时较长，可用 `--max-steps` 调整每个会话的预算。
 
-- 游戏目录只读。每次运行都在输出目录下新建用户目录，输出目录本身必须不存在。
-- 命令闸门照常生效；`--block-presumed`/`--block-unreviewed` 分别阻止旧推定和未复核命令，默认均放行；策略记入报告。
-- `--device keyboard` 使用 `key.cfg` 中的按键，按钮通过导航键沿按钮链接选中。
-- `--fork save` 让路线分支从选项处写下的检查点读档开始，而不是每次从头重放；构建缺少快照布局能力时自动退回重放。
-- `--without-snapshots` 显式选择无快照研究：保留快照命令的实时状态影响，但不生成可保存图像；V1–V4标为跳过，不能与 `--fork save` 合用。适用于已知部分快照布局、但剧情中的活动效果仍无法保存的构建，不代表存读档通过。
-- `--manifest` 读取可选的每游戏纠正清单，格式见[探针设计第 16 节](../design/probe.md#16-完整实现2026-11-01)。
-- `tools/probe_matrix.py` 把多个输出目录汇总为"游戏 × 检查"矩阵，只读。
+`--fork save` 优先从选项处保存的检查点分支。`--without-snapshots` 跳过快照捕获和 V1–V4，不能与 `--fork save` 合用。检查清单见 `--help`，退出码、报告和纠正清单见[探针说明](../../crates/cmvs-probe/README.md)。
 
-任何检查失败或被闸门阻止时退出码为 1。检查清单与判定规则见[探针设计](../design/probe.md)。
+## 引擎档案
+
+```sh
+cargo run --offline --release -p cmvs-profile-research -- identify game
+cargo run --offline --release -p cmvs-profile-research -- show akifd
+```
+
+`identify` 识别构建并核对已登记的分派表。`show` 查看档案状态与命令映射。`table` 输出候选档案，`generate-playback` 生成静态运行表，详见[引擎档案](../design/engine-profiles.md)。
 
 ## 外部样本审计
 
-可复用的脚本结构测试适配器接受独立 PS2A 与受支持的 CPZ6/CPZ7 输入，默认忽略，需显式设置输入路径。当前完整命令、报告协议及边界见[脚本审计方法](../games/amatsutsumi/script-audit.md#重复运行)。测试本身只保存合成数据，真实输入与元数据报告按游戏分开归档。
+脚本结构、命令入口和执行覆盖的检查方法见[研究与验证约定](../research.md#外部样本审计)。

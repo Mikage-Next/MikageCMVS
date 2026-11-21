@@ -1,8 +1,8 @@
 //! The engine's platform requests on a phone: there is no window to resize, title
 //! or decorate, so requests are recorded and answered from the host view.
 use cmvs_core::{
-    platform::{PlatformBackend, PlatformRequest},
-    raster::RgbaImage,
+    host::platform::{PlatformBackend, PlatformRequest},
+    render::raster::RgbaImage,
 };
 use std::error::Error;
 
@@ -25,50 +25,50 @@ pub struct DisplayState {
 }
 
 impl PlatformBackend for MobileBackend<'_> {
-    fn read_device_frame(&mut self) -> Result<RgbaImage, Box<dyn Error>> {
+    fn read_device_frame(&mut self) -> Result<RgbaImage, Box<dyn Error + Send + Sync>> {
         self.device_frame
             .ok_or("no frame has been presented yet")?
             .read()
     }
-    fn window_size(&self) -> Result<[u32; 2], Box<dyn Error>> {
+    fn window_size(&self) -> Result<[u32; 2], Box<dyn Error + Send + Sync>> {
         Ok(self.surface)
     }
-    fn windowed_size(&self) -> Result<[u32; 2], Box<dyn Error>> {
+    fn windowed_size(&self) -> Result<[u32; 2], Box<dyn Error + Send + Sync>> {
         Ok(self.state.windowed_size)
     }
-    fn fullscreen(&self) -> Result<bool, Box<dyn Error>> {
+    fn fullscreen(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(self.state.fullscreen)
     }
-    fn aspect_mode(&self) -> Result<u32, Box<dyn Error>> {
+    fn aspect_mode(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(self.state.aspect_mode)
     }
-    fn aspect_scaling(&self) -> Result<bool, Box<dyn Error>> {
+    fn aspect_scaling(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(self.state.aspect_scaling)
     }
-    fn render_mode(&self) -> Result<u32, Box<dyn Error>> {
+    fn render_mode(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(self.state.render_mode)
     }
-    fn resizable(&self) -> Result<bool, Box<dyn Error>> {
+    fn resizable(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(false)
     }
-    fn stretch_filter_supported(&self) -> Result<bool, Box<dyn Error>> {
+    fn stretch_filter_supported(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(true)
     }
-    fn linear_stretch_supported(&self) -> Result<bool, Box<dyn Error>> {
+    fn linear_stretch_supported(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(true)
     }
-    fn pixel_shader_major(&self) -> Result<u8, Box<dyn Error>> {
+    fn pixel_shader_major(&self) -> Result<u8, Box<dyn Error + Send + Sync>> {
         Ok(0)
     }
     /// The device screen is the only display, whichever one the game asks for.
-    fn select_fullscreen_monitor(&mut self, mode: u32) -> Result<bool, Box<dyn Error>> {
+    fn select_fullscreen_monitor(&mut self, mode: u32) -> Result<bool, Box<dyn Error + Send + Sync>> {
         self.apply(&PlatformRequest::FullscreenMonitor(mode))?;
         Ok(mode == 5)
     }
-    fn display_count(&self) -> Result<u32, Box<dyn Error>> {
+    fn display_count(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(1)
     }
-    fn apply(&mut self, request: &PlatformRequest) -> Result<(), Box<dyn Error>> {
+    fn apply(&mut self, request: &PlatformRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
         match request {
             PlatformRequest::WindowSize(size) => self.state.windowed_size = *size,
             PlatformRequest::AspectMode(mode) => {

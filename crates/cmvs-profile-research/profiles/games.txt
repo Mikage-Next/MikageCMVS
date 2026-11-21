@@ -1,0 +1,227 @@
+# Game records: data hashes identify a game; executables confirm the build of its profile.
+# Hashes are evidence from docs/games/<game>/; game files themselves never enter the repository.
+
+game puriring
+profile cmvs-20070119
+start data/pack/start.ps2 sha256=6e8f2a8b81065f5163cd7447a80002ed41e9f1067846cd38ecda7936f07e6064
+archive data/pack/script.cpz sha256=125070cfeb012eb35be04577196942c26cff76f0a52d1046d7a76a444ae1e140
+# This build has no 0x201d handler; no game ID is supplied by the startup script.
+game-id 0x00000000
+executable cmvs.exe sha256=5ce421db393cbc5ca443fa405c5a9e31c348416109cb1279d91718f490c0e602
+end
+
+game asukimi
+profile cmvs-20071117
+start data/pack/start.ps2 sha256=f92c0997c47900f9ae8fc1f388f04ed2688622274e22bd4bf76920af5fd46c0c
+archive data/pack/script.cpz sha256=2fe6d38487d252d54d64b1a70c12d29173a789348089b00c6c5413f5cf4f7d32
+# This build has no 0x201d handler; CSV2 header offset 12 is written as zero.
+game-id 0x00000000
+executable cmvs.exe sha256=caff7901a7dc4ec963d7fde358028cdd68dfd87fc7925c9715a20e7a5f36d02b
+end
+
+game harouse
+profile cmvs-20080719
+start data/pack/start.ps2 sha256=375c8705bd17e4219f90deba01c8fa57538d2e8182adf9daf96d6ca71e45ffd9
+archive data/pack/script.cpz sha256=ebc450c1953a863151e509f53715aeaea882c7d7aad3454e1efcbd7f95167b47
+# 0x201d is a no-op; no game ID is supplied by the startup script.
+game-id 0x00000000
+executable cmvs.exe sha256=afe3b3a895e7b3ba5f78e6f6464296f1d028e87307c8de5a568b88fd6086491e
+end
+
+game asunana
+profile cmvs-20080903
+start data/pack/start.ps2 sha256=c224f482437395fc30503a3bc622221c246b295c4e2adc91d76ca3e9cb689df4
+archive data/pack/script.cpz sha256=4d2dae6ee1e310c2d6c78efefd03f2a1732619e6f49ce64840be99ca9c6fd6b8
+game-id 0x00000000
+executable cmvs.exe sha256=f77ecbfd39d1076c66915544d73b9c2d2c5876fbabeaef3d589050b6094d13ac
+end
+
+game memoria
+profile cmvs-20090815
+start data/pack/start.ps2 sha256=651436ed2fde5075259c9ebff4ae40d41530638e3f2094d33353318bd0e04826
+archive data/pack/script.cpz sha256=f041077362880c3d0bf82f7a44ba4311648c4119e18522f507dc1dcd59df305b
+game-id 0x00000000
+executable cmvs.exe sha256=36fa780a5d2b8df4ac6a6e48a2f78708b79aa10d22eb575a5ae74742d902f71a
+end
+
+game natsuuta
+profile cmvs-20100314
+start data/pack/start.ps2 sha256=44b7b03d4b402675c9375a2844f2a42dd13f6b36150bfd76086403c9fd9741b1
+archive data/pack/script.cpz sha256=96234e92f5a2995543d9e341181253cacf741a70d5180de4fe701525aa264d5a
+game-id 0x17300001
+executable cmvs32.exe sha256=97575da34a284fa534084ca8452741e0e176650f3396308f92c2c8cf7ffc9bc8
+end
+
+game hassaku
+profile cmvs-20101211
+start data/pack/start.ps2 sha256=43f70567b72c0ec52561caffe51731cf92cde76abdcd58a018e93ccb4044aabb
+archive data/pack/script.cpz sha256=c1519a12a43618b290c62d0a550303ee16c94275c382762f2ebd2e59f0523bc9
+game-id 0x17300001
+executable cmvs64.exe sha256=158409c71cf14c3dedb7d051585e5f48e56dbc621bb19e56d084cd4fe8d4352f
+executable cmvs32.exe sha256=88a6a42d39c6879f0a8ebb9c593ef2263d87d49f6e2a3cdeb37dde526f3bacb9
+end
+
+game miranosu
+profile cmvs-20110525
+start data/pack/start.ps2 sha256=2e8c7261ea801f59c9e80b9cdbde89832c0a65f7b622e2fa4551509b1cfe5143
+archive data/pack/script.cpz sha256=bd70dba1785ec45494e73c451e6d492a91fd2eb0e56787dc60bce96c9b06effe
+game-id 0x17500003
+executable cmvs64.exe sha256=9870e6d5cbd5242b9c686aae20fe10697e87328a66d322cfdb2c80021cb645c5
+executable cmvs32.exe sha256=78c2283990f3fec167a8097e5e56304edbad7e94d5367eae9e3f5cfa56b4cc4e
+end
+
+game kazokubu
+profile cmvs-20120309
+start data/pack/start.ps2 sha256=2f91e026d1e415ec8b0ce17c218f712458f9f7dcb50c5b433fa89a6cc7fdd465
+archive data/pack/script.cpz sha256=7e1c9f6532144c64fded818930a69405a63a571c5f233c26b77e4da27d950cb9
+game-id 0x17500003
+executable cmvs64.exe sha256=f93d90d45dad95588f91425fa5d4fe20be0d97e1978ccb4ae0e83ca6e09aa15e
+executable cmvs32.exe sha256=c4997f02ddc9dba6e8b766d512c9e2b37b3835ec6a00bf1641d08b8b82bb043d
+end
+
+game hapymaher
+profile cmvs-20130131
+start data/pack/start.ps3 sha256=62fc84b6231432a0aed498065329b630f76ef4c9e114c1bf6dbdc4e564c0399e
+archive data/pack/script.cpz sha256=ae25d8e3bd2a2f7539c81dafe0b6cba445c5c346c6c26f7702337e10a86ed103
+game-id 0x17500003
+executable cmvs64.exe sha256=637d2928efab89e7b5fc68b2d0801cfdefbfa65558b69378580c145c52b8c05b
+executable cmvs32.exe sha256=8048c7615b019d3b2ef867ad2bcc108f27092c7712250794d27d33e6cd7f2930
+end
+
+game hapymaherfd
+profile cmvs-20140217
+start data/pack/start.ps3 sha256=5c8f2d51a859fb396782ca8ecedef77398d61191debeff29315e52693574b828
+archive data/pack/script.cpz sha256=13f8699c9ca44cd43731526aaf0abb5166026c2248d028aadcdd0d80ebcd1ea6
+game-id 0x17500003
+executable cmvs64.exe sha256=04e37c27be28aa0ffe5661a2757e766488316ccdb8c8698da2ea7677675b5aaa
+executable cmvs32.exe sha256=c6d85a84da362ba86d31b5763e0867e6e8df5e7243b4da34d9aafe2b1689f4cd
+end
+
+game chronoclock
+profile cmvs-20150405
+start data/pack/start.ps3 sha256=d4263a32830bb385fabfa7e06c2fde2d70e072722e3ed6c317292e7086fb6dce
+archive data/pack/script.cpz sha256=aa4bd891cc50fe658cacc050c6b216e8ba0389d17d01163e335f3177d6f14ba3
+game-id 0x17700011
+executable cmvs64.exe sha256=d1c4ade9551b827b8e401fc10f68a73e2525a67a217b63747898f5797894911d
+executable cmvs32.exe sha256=30edecfde8d69b60102c79c82db7eda3895126510e51c0ec76658a303f5a49b4
+end
+
+game amatsutsumi
+profile cmvs-20160201
+start data/pack/start.ps3 sha256=c338313949a803e834acf0d746c93f09c4d41f558af8fb6c13ab1ee55aff2bd0
+# Version 1.03 startup; same recorded engine binaries and script archive.
+start data/pack/start.ps3 sha256=14a5f200dc0c8dfc00cbc1c3293d09849fd4da060ecdc1d6cbced031691a4986
+archive data/pack/script.cpz sha256=92b367e8c3d2791f1dd2ca8426581974fbb640d2766f2e82ab12383d2f5359e4
+game-id 0x17800016
+executable cmvs64.exe sha256=dc74d2001387ae1aefbdc4204216de5ebb9d3896009280720c4e7a91b42d84f5
+executable cmvs32.exe sha256=8b09e6b23e0eeaecccf6a584cb94720d239c00f177ed02036ab8845120d99197
+policy skip-auto-resume integer=2198
+end
+
+game aoitori
+profile cmvs-20171114
+start data/pack/start.ps3 sha256=10afc37c05c970a898ea263b2a45e553813be8753302754349d8b9c1b801f5fe
+archive data/pack/script.cpz sha256=d2a22d23d600a75ecbabef3c28fa9bdcbe69a33aed756487c9c515e021295cc7
+game-id 0x1810a032
+executable cmvs64.exe sha256=3bccda5d7611412c6938c0c9b06b2195914cfb78763a53f2c235bb6479395ee0
+executable cmvs32.exe sha256=b1621c5b504a800344316d72dc4477fbf13a00f15f8308470952429f4013003a
+end
+
+game realive
+profile cmvs-20190305
+start data/pack/start.ps3 sha256=9a331e2cfa3b031687a6334065198db99ee86f1c70bbfbd45b9545865560a1d5
+archive data/pack/script.cpz sha256=ef496c6470359b45bdb3838be5c1d6dd4aca896dc976f17f7003a984e376cf24
+game-id 0x1810a032
+executable cmvs64.exe sha256=02b71aac3d3d1ced1d0312b6c37748cf12df9cffd9585fb07787e6ca43199f00
+executable cmvs32.exe sha256=6705a43d85121b56961515f3dd0a0766a14a91ffa76df8866d8c7d6133a56a44
+end
+
+game seishunf
+profile cmvs-20190405
+start data/pack/start.ps3 sha256=1bf85540cc22dbc56845c9a5f683e34c8485dc6eda504e2578431639fb1c74bc
+archive data/pack/script.cpz sha256=558859b1e3ca064b6c189cfc685b36bf4f506433ee613179ba85a306c7d017fa
+game-id 0x1920a045
+executable cmvs64.exe sha256=c1742b5873e6d03f5cc7bc6f5b3b23655ec67e7cddf307deefa75349caed33be
+executable cmvs32.exe sha256=1d47c85d947a111440974184dc3ee4530d188f1b54e8b75538b5b2156c2e67d8
+end
+
+game kunado
+profile cmvs-20211006
+start data/pack/start.ps3 sha256=08e371cc3af967a12e4a45d7063d0644a8fc4d589a08348b2d9a4b919efda4ad
+archive data/pack/script.cpz sha256=d3e2309180801dcff74abf2597e2d07b21c29c1b7afd0ab51b5c9a13fbd81ea9
+game-id 0x2020a053
+executable cmvs64.exe sha256=58e993a82e741ea73d3d1b5d89363dcaf435e72e6d505324e1de0c0ba5486631
+executable cmvs32.exe sha256=4b42514abba732bd3f4bf71cbc8a7862831074fd8905a7b128fc195b30279999
+end
+
+game hapymaher_re
+profile cmvs-20221105
+start data/pack/start.ps3 sha256=3f5089503ee7e8c1e139db98c1446d131382bd12997330d1f5a5ff20177bccea
+archive data/pack/script.cpz sha256=3c944d1e4d042e819782e1d0e3bf3fa85ce553a1f0dc9e8f2589465afa97caf4
+game-id 0x17600013
+executable cmvs64.exe sha256=dfbabd2abac5055d3ab2144a983b6c441b87b294d19607e9a4829e2ea954e86c
+executable cmvs32.exe sha256=aa2f76985e69ec5fcee2762051a234c111529e8b339d733dee188b3a62888073
+end
+
+game hapymaherfd_re
+profile cmvs-20221105
+start data/pack/start.ps3 sha256=dc336b0d50c848a12f6dbcd4ebee26b7c1516821ecc16625e5b2ba27f5675b85
+archive data/pack/script.cpz sha256=fb93c8d5277be1c1cd812214ccc5a9ded679fcdbde1b98ef17a925d18a104959
+game-id 0x17600015
+executable cmvs64.exe sha256=dfbabd2abac5055d3ab2144a983b6c441b87b294d19607e9a4829e2ea954e86c
+executable cmvs32.exe sha256=aa2f76985e69ec5fcee2762051a234c111529e8b339d733dee188b3a62888073
+end
+
+game miharu
+profile cvns-20090203
+start data/pack/start.pss sha256=834dc88750f547d341ee732a7116472d4fef18dd57a7bbe0ac9ba77dd2a87a09
+archive data/pack/script.cpz sha256=8c2c749799a4592e6a185a098d6da16d3c347b568874a5695eaeff53f1019f07
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1006.
+game-id 0x00000000
+executable cvns.exe sha256=8e6044466b928d77f0a94a0d0f32fe48190596bf628115598881c2aa3a4885aa
+end
+
+game aruto
+profile cvns-20090203
+start data/pack/start.pss sha256=8733206a83c7d249ab9245d85d9dfe0b7125c3d2d85e0b2f730000d79dd35bc9
+archive data/pack/script.cpz sha256=b62efd2250283532e8ac3a01d1ce46846b28900811a26f58d8296faf8d22d5f7
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1005.
+game-id 0x00000000
+executable cvns.exe sha256=8e6044466b928d77f0a94a0d0f32fe48190596bf628115598881c2aa3a4885aa
+end
+
+game akifd
+profile cvns-20050727
+start data/pack/start.pss sha256=bc23cdd6e62f9a09953169b4fb71dcc3b6b5d58c4bd7aa9ccd501128dba2483a
+archive data/pack/script.cpz sha256=d380b8065fdf05440047adc74b36d59cab345486e2534d0e06fb195ecab8c699
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1003.
+game-id 0x00000000
+executable cvns.exe sha256=fd475dda79e4a559d934b214494d314539915afde7a910b3d35269dd9cd4a028
+end
+
+game aki
+profile cvns-20050216
+start data/pack/start.pss sha256=3c2507628fecfabd57a17d9f306fb9faf9dc42115fc10fb88bba35b52a5c03a9
+archive data/pack/script.cpz sha256=a1a120a72fac0caa77b5cd93338da58b12b6b3e13681211aa0603f0ee388c050
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1003.
+game-id 0x00000000
+executable cvns.exe sha256=1e0d17db759650c32e94a9bc1eb6a143463df22638fba687b420644dce969e42
+end
+
+game majifd
+profile cvns-20040730
+start data/pack/start.pss sha256=2f505e8ac49ccc8be7cfc79861ab1d2390050300a011fad07fe80b2f721b8c4f
+archive data/pack/script.cpz sha256=9ecae4b71c801414925d505ff62103865283f6925088028d729e3d134a22d46e
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1001.
+game-id 0x00000000
+executable cvns.exe sha256=2bfcb306f094a3968af7bc88e37a091305c628b06ddfbf0fce14268d66bf3a07
+end
+
+game maji
+profile cvns-20040515
+start data/pack/start.pss sha256=819bdf49cec478d6ff04939c686f77fba7673fd80eb6d8575a60de9dff62fc55
+archive data/pack/script.cpz sha256=e55d699f671d47479677b406d0c5d947ab9d22e369c93af8653665af284775de
+# Not yet established which CVNS command, if any, carries a game ID; cvns.cfg has GAME_ID=1001.
+game-id 0x00000000
+executable cvns.exe sha256=8d5abea307067f2789ae3a7fb4a9cd09aa4e48393a06e3d172ca4250dc56274f
+end

@@ -1,6 +1,11 @@
+use crate::CommentInput;
 use cmvs_core::{
-    platform::{FontDialogResult, PlatformBackend, PlatformRequest},
-    raster::RgbaImage,
+    TextEncoding,
+    host::platform::FontDialogResult,
+    host::platform::PlatformBackend,
+    host::platform::PlatformRequest,
+    host::platform::{TextDialogRequest, TextDialogResult},
+    render::raster::RgbaImage,
 };
 use std::error::Error;
 
@@ -11,26 +16,13 @@ pub struct HostBackend {
     pub aspect: u32,
     pub scaling: bool,
     pub render: u32,
+    /// Encoding of the runtime served by this backend.
+    pub encoding: TextEncoding,
+    pub comment_input: CommentInput,
 }
 impl HostBackend {
-    pub fn movie_canvas(&self, image: &RgbaImage) -> Result<RgbaImage, cmvs_core::FormatError> {
-        if [image.width(), image.height()] == self.size {
-            return Ok(image.clone());
-        }
-        let [width, height] = self.size;
-        let mut target = vec![0; (width * height) as usize];
-        image.draw_scaled(&mut target, width, height, 1, self.render == 1)?;
-        let pixels = target
-            .into_iter()
-            .flat_map(|word| {
-                let [b, g, r, _] = word.to_le_bytes();
-                [r, g, b, 255]
-            })
-            .collect();
-        RgbaImage::new(width, height, pixels)
-    }
-    pub fn preferences(&self) -> cmvs_core::settings::DisplayPreferences {
-        cmvs_core::settings::DisplayPreferences {
+    pub fn preferences(&self) -> cmvs_core::host::settings::DisplayPreferences {
+        cmvs_core::host::settings::DisplayPreferences {
             fullscreen: self.fullscreen,
             aspect_mode: self.aspect,
             aspect_scaling: self.scaling,
@@ -45,58 +37,81 @@ impl HostBackend {
             aspect: 1,
             scaling: true,
             render: 0,
+            encoding: TextEncoding::default(),
+            comment_input: CommentInput::default(),
         }
     }
 }
 impl PlatformBackend for HostBackend {
-    fn select_fullscreen_monitor(&mut self, mode: u32) -> Result<bool, Box<dyn Error>> {
+    fn select_fullscreen_monitor(
+        &mut self,
+        mode: u32,
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(mode == 5)
     }
-    fn display_count(&self) -> Result<u32, Box<dyn Error>> {
+    fn display_count(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(1)
     }
     fn logical_size(&self) -> [u32; 2] {
         self.size
     }
-    fn read_device_frame(&mut self) -> Result<RgbaImage, Box<dyn Error>> {
+    fn read_device_frame(&mut self) -> Result<RgbaImage, Box<dyn Error + Send + Sync>> {
         self.frame
             .clone()
             .ok_or_else(|| "no completed host frame".into())
     }
-    fn window_size(&self) -> Result<[u32; 2], Box<dyn Error>> {
+    fn window_size(&self) -> Result<[u32; 2], Box<dyn Error + Send + Sync>> {
         Ok(self.size)
     }
-    fn windowed_size(&self) -> Result<[u32; 2], Box<dyn Error>> {
+    fn windowed_size(&self) -> Result<[u32; 2], Box<dyn Error + Send + Sync>> {
         Ok(self.size)
     }
-    fn fullscreen(&self) -> Result<bool, Box<dyn Error>> {
+    fn fullscreen(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(self.fullscreen)
     }
-    fn pixel_shader_major(&self) -> Result<u8, Box<dyn Error>> {
+    fn pixel_shader_major(&self) -> Result<u8, Box<dyn Error + Send + Sync>> {
         Ok(0)
     }
-    fn render_mode(&self) -> Result<u32, Box<dyn Error>> {
+    fn render_mode(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(self.render)
     }
-    fn resizable(&self) -> Result<bool, Box<dyn Error>> {
+    fn resizable(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(false)
     }
-    fn stretch_filter_supported(&self) -> Result<bool, Box<dyn Error>> {
+    fn stretch_filter_supported(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(true)
     }
-    fn linear_stretch_supported(&self) -> Result<bool, Box<dyn Error>> {
+    fn linear_stretch_supported(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(true)
     }
-    fn aspect_mode(&self) -> Result<u32, Box<dyn Error>> {
+    fn aspect_mode(&self) -> Result<u32, Box<dyn Error + Send + Sync>> {
         Ok(self.aspect)
     }
-    fn aspect_scaling(&self) -> Result<bool, Box<dyn Error>> {
+    fn aspect_scaling(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(self.scaling)
     }
-    fn poll_font_dialog(&mut self, _: &[u8]) -> Result<FontDialogResult, Box<dyn Error>> {
+    fn poll_font_dialog(
+        &mut self,
+        _: &[u8],
+    ) -> Result<FontDialogResult, Box<dyn Error + Send + Sync>> {
         Ok(FontDialogResult::Cancelled)
     }
-    fn apply(&mut self, request: &PlatformRequest) -> Result<(), Box<dyn Error>> {
+    fn poll_text_dialog(
+        &mut self,
+        request: &TextDialogRequest,
+    ) -> Result<TextDialogResult, Box<dyn Error + Send + Sync>> {
+        self.comment_input.poll(request, self.encoding)
+    }
+    fn cancel_text_dialog(&mut self) {
+        self.comment_input.cancel();
+    }
+    fn poll_message_dialog(
+        &mut self,
+        _: &cmvs_core::host::platform::MessageDialogRequest,
+    ) -> Result<cmvs_core::host::platform::MessageDialogResult, Box<dyn Error + Send + Sync>> {
+        Ok(cmvs_core::host::platform::MessageDialogResult::Accepted)
+    }
+    fn apply(&mut self, request: &PlatformRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
         match request {
             PlatformRequest::Fullscreen(value) => self.fullscreen = *value,
             PlatformRequest::FullscreenMonitor(_) => {}
@@ -110,5 +125,39 @@ impl PlatformBackend for HostBackend {
             _ => return Err("unsupported host display request".into()),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restored_keyboard_ignores_late_replies_and_uses_the_session_encoding() {
+        let mut backend = HostBackend::new([800, 600]);
+        backend.encoding = TextEncoding::Gbk;
+        let request = TextDialogRequest {
+            title: vec![],
+            prompt: vec![],
+            initial: b"\xd6\xd0".to_vec(),
+            max_bytes: 8,
+        };
+        backend.poll_text_dialog(&request).unwrap();
+        let previous = backend.comment_input.take_request().unwrap();
+        backend.cancel_text_dialog();
+        backend.poll_text_dialog(&request).unwrap();
+        let current = backend.comment_input.take_request().unwrap();
+        assert_eq!(current.initial, "中");
+        backend
+            .comment_input
+            .submit(previous.id, Some("old".into()));
+        assert!(matches!(
+            backend.poll_text_dialog(&request).unwrap(),
+            TextDialogResult::Pending
+        ));
+        backend.comment_input.submit(current.id, Some("文".into()));
+        assert!(
+            matches!(backend.poll_text_dialog(&request).unwrap(), TextDialogResult::Accepted(bytes) if bytes == b"\xce\xc4")
+        );
     }
 }

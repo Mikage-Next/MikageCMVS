@@ -1,11 +1,13 @@
 //! CPZ3's flat index and shared index/resource cipher.
-use super::{ArchiveError, Entry};
+use super::{ArchiveError, Entry, LookupTable};
 use crate::FormatError;
 use std::io::{Read, Seek, SeekFrom};
 
 mod write;
 
 pub const CPZ3_HEADER_SIZE: usize = 20;
+pub(super) const INDEX_KEY_MASK: u32 = 0xdddddddd ^ 0x7bf4a539;
+pub(super) const FILE_KEY_MASK: u32 = 0xc7f5da63;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cpz3Layout {
@@ -22,10 +24,12 @@ fn word(bytes: &[u8]) -> u32 {
 
 /// CPZ3 uses a different checksum seed from CPZ5/6/7.
 pub fn cpz3_checksum(bytes: &[u8]) -> u32 {
+    checksum_chunk(0x78341256, bytes)
+}
+
+pub(super) fn checksum_chunk(sum: u32, bytes: &[u8]) -> u32 {
     let (words, tail) = bytes.as_chunks::<4>();
-    let sum = words
-        .iter()
-        .fold(0x78341256u32, |sum, b| sum.wrapping_add(word(b)));
+    let sum = words.iter().fold(sum, |sum, b| sum.wrapping_add(word(b)));
     tail.iter()
         .fold(sum, |sum, &b| sum.wrapping_add(u32::from(b)))
 }
@@ -95,7 +99,8 @@ impl Cpz3Layout {
 pub struct Cpz3Index {
     pub layout: Cpz3Layout,
     entries: Vec<Entry>,
-    entry_keys: Vec<u32>,
+    lookup: LookupTable,
+    pub(super) entry_keys: Vec<u32>,
 }
 
 impl Cpz3Index {
@@ -113,11 +118,7 @@ impl Cpz3Index {
         if cpz3_checksum(&bytes) != layout.index_checksum_raw {
             return Err(FormatError("CPZ3 index checksum mismatch").into());
         }
-        crypt(
-            &mut bytes,
-            word(&header[16..]) ^ 0xdddddddd ^ 0x7bf4a539,
-            false,
-        );
+        crypt(&mut bytes, word(&header[16..]) ^ INDEX_KEY_MASK, false);
         let mut entries = Vec::new();
         let mut entry_keys = Vec::new();
         let directory: std::sync::Arc<[u8]> = [].into();
@@ -153,14 +154,16 @@ impl Cpz3Index {
                 offset: absolute,
                 checksum_raw: word(&rec[16..]),
             });
-            entry_keys.push(word(&rec[20..]) ^ 0xc7f5da63);
+            entry_keys.push(word(&rec[20..]) ^ FILE_KEY_MASK);
             offset += length;
         }
         // The original stops at file_count. Real indexes can have a large
         // encrypted padding region; data_offset includes that whole region.
+        let lookup = LookupTable::from_entries(&entries, <[u8]>::to_vec);
         Ok(Self {
             layout,
             entries,
+            lookup,
             entry_keys,
         })
     }
@@ -170,19 +173,8 @@ impl Cpz3Index {
     }
 
     pub fn find(&self, name: &[u8]) -> Result<usize, FormatError> {
-        let mut matches = self
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e.name == name);
-        let first = matches
-            .next()
-            .ok_or(FormatError("CPZ3 filename not found"))?
-            .0;
-        if matches.next().is_some() {
-            return Err(FormatError("ambiguous CPZ3 basename"));
-        }
-        Ok(first)
+        self.lookup
+            .find(name, "CPZ3 filename not found", "ambiguous CPZ3 basename")
     }
 
     /// Fold ASCII query bytes, preserving Shift-JIS pairs, and select the first match.
@@ -190,8 +182,7 @@ impl Cpz3Index {
         if name.len() >= 64 || name.contains(&0) {
             return Err(FormatError("invalid CPZ3 lookup name"));
         }
-        let key = super::lookup_key(name)?;
-        Ok(self.entries.iter().position(|e| e.name == key))
+        Ok(self.lookup.lookup(name))
     }
 
     pub fn read_entry<R: Read + Seek>(

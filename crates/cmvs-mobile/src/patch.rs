@@ -17,7 +17,7 @@
 //! byte obfuscation; images are PNG files named like the PB3 they replace
 //! (`cg_bg.png` for `cg_bg.pb3`). Subtitled movies sit next to the archives
 //! as plain `.cmv` files. The patched scripts carry GBK text.
-use cmvs_core::{patch::PatchFiles, raster::RgbaImage};
+use cmvs_core::{host::patch::PatchFiles, render::raster::RgbaImage};
 use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
@@ -26,7 +26,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 /// The translation patches of a game, if it has any, layered as one, and a
 /// line for the log.
@@ -249,7 +249,7 @@ impl PatchFiles for LoosePatch {
         {
             let (image, alpha) =
                 decode_png(&png).map_err(|e| format!("patch image {stem}.png: {e}"))?;
-            return Ok(Some(cmvs_core::patch::raw_image(&image, alpha)));
+            return Ok(Some(cmvs_core::host::patch::raw_image(&image, alpha)));
         }
         self.read(name)
     }
@@ -383,7 +383,7 @@ impl PatchFiles for PkPatch {
         };
         let (image, alpha) =
             decode_png(&png).map_err(|e| format!("patch image {stem}.png: {e}"))?;
-        Ok(Some(cmvs_core::patch::raw_image(&image, alpha)))
+        Ok(Some(cmvs_core::host::patch::raw_image(&image, alpha)))
     }
 
     fn movie_directory(&self) -> Option<&[u8]> {
@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(patch.script(b"main.ps3").unwrap().unwrap(), b"PS2A main");
         assert!(patch.script(b"other.ps3").unwrap().is_none());
         let raw = patch.image(b"LOGO.pb3").unwrap().unwrap();
-        let (image, alpha) = cmvs_core::patch::parse_raw_image(&raw).unwrap();
+        let (image, alpha) = cmvs_core::host::patch::parse_raw_image(&raw).unwrap();
         assert!(!alpha);
         assert_eq!(image.pixels(), &[1, 2, 3, 255, 4, 5, 6, 255]);
         assert_eq!(patch.movie_directory(), Some(b"Pk\\".as_slice()));
@@ -695,7 +695,7 @@ mod tests {
         assert_eq!(patch.script(b"sn1.ps3").unwrap().unwrap(), b"PS2A pk sn1");
         assert!(patch.script(b"sn2.ps3").unwrap().is_none());
         let (image, alpha) =
-            cmvs_core::patch::parse_raw_image(&patch.image(b"title.pb3").unwrap().unwrap())
+            cmvs_core::host::patch::parse_raw_image(&patch.image(b"title.pb3").unwrap().unwrap())
                 .unwrap();
         assert!(alpha);
         assert_eq!(image.pixels(), &[9, 8, 7, 6]);

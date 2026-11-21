@@ -1,8 +1,7 @@
 //! The engine's comment dialog (0x213c) through the system keyboard. Game strings use
 //! the selected game encoding in both directions.
 use cmvs_core::{
-    TextEncoding,
-    platform::{TextDialogRequest, TextDialogResult},
+    TextEncoding, host::platform::TextDialogRequest, host::platform::TextDialogResult,
 };
 use cmvs_font::text_codec;
 use std::error::Error;
@@ -31,22 +30,13 @@ pub fn edit(
     request: &TextDialogRequest,
     encoding: TextEncoding,
     keyboard: &mut Keyboard<'_>,
-) -> Result<TextDialogResult, Box<dyn Error>> {
+) -> Result<TextDialogResult, Box<dyn Error + Send + Sync>> {
     let decode = |bytes: &[u8]| text_codec::decode(encoding, bytes);
     let title = decode(&request.title)?;
     let prompt = decode(&request.prompt)?;
     let initial = decode(&request.initial)?;
-    let budget = if request.max_bytes == 0 {
-        255
-    } else {
-        request.max_bytes.min(255)
-    };
-    // UTF-8 has variable-width characters; the callback enforces the byte budget.
-    let limit = if encoding == TextEncoding::Utf8 {
-        budget.min(127)
-    } else {
-        (budget / 2).max(1)
-    };
+    let budget = request.byte_limit();
+    let limit = request.character_limit(encoding);
     let mut check = |text: &str| match text_codec::unmappable(encoding, text) {
         _ if text.contains('\0') => Err("Input cannot contain NUL characters".into()),
         Ok(bad) if bad.is_empty() => {

@@ -1,19 +1,30 @@
-//! Public script initialization and explicit cross-script control.
-//! No save snapshot, callback scheduling, rendering, or filesystem search policy.
+//! Script loading, cross-script calls, and callback scheduling.
+//!
+//! [`ScriptControl`] manages script registrations and scheduled callback entry points.
+//! [`ArchiveScripts`] supplies scripts from the registered archive. The runtime
+//! coordinates these operations through [`crate::runtime::Runtime`]; rendering and
+//! save-snapshot orchestration remain separate.
 use crate::{
-    cpz::{ArchiveIndex, Cpz7Parameters},
+    bootstrap::Bootstrap,
+    cpz::{ArchiveIndex, ArchiveVersion, Cpz7Parameters},
     dispatch::Call,
     evaluate::error,
-    machine::Machine,
+    filesystem::HostFs,
+    profile::EngineProfile,
     ps3::Script,
 };
 use std::{
     collections::BTreeMap,
     error::Error,
     io::{Read, Seek},
+    path::{Path, PathBuf},
 };
 
-pub type LoadError = Box<dyn Error>;
+mod startup;
+pub use startup::Startup;
+use startup::{ArchiveSettings, ArchiveTarget, archive_settings};
+
+pub type LoadError = Box<dyn Error + Send + Sync>;
 
 /// Open an archive using its literal startup registration when CPZ7 requires keys.
 /// Other archive versions keep their existing detection policy.
@@ -22,18 +33,45 @@ pub fn archive_index_from_start<R: Read + Seek>(
     script: &Script,
     basename: &[u8],
 ) -> Result<ArchiveIndex, LoadError> {
-    reader.rewind()?;
-    let mut magic = [0; 4];
-    reader.read_exact(&mut magic)?;
-    reader.rewind()?;
-    if &magic == b"CPZ7" {
-        let parameters = cpz7_parameters_from_start(script, basename)?.ok_or(
-            crate::FormatError("archive has no literal CPZ7 startup registration"),
-        )?;
+    literal_archive_index(reader, script, ArchiveTarget::Basename(basename))
+}
+
+fn literal_archive_index(
+    reader: &mut (impl Read + Seek),
+    script: &Script,
+    target: ArchiveTarget<'_>,
+) -> Result<ArchiveIndex, LoadError> {
+    if crate::cpz::read_version(reader)? == ArchiveVersion::Cpz7 {
+        let parameters = literal_parameters(script, target)?.ok_or(crate::FormatError(
+            "archive has no literal CPZ7 startup registration",
+        ))?;
         Ok(ArchiveIndex::read_with_cpz7_parameters(reader, parameters)?)
     } else {
         Ok(ArchiveIndex::read(reader)?)
     }
+}
+
+/// Use executed settings for profiled CPZ5/7 inputs; standalone inspection can still
+/// read older formats and literal registrations without choosing an engine profile.
+pub fn archive_index_for_profile(
+    reader: &mut (impl Read + Seek),
+    script: &Script,
+    fs: &dyn HostFs,
+    root: &Path,
+    relative: &Path,
+    profile: Option<&EngineProfile>,
+) -> Result<ArchiveIndex, LoadError> {
+    let root = fs.canonicalize(root)?;
+    let target = ArchiveTarget::game(fs, &root, relative);
+    if let Some(p) = profile
+        && matches!(
+            crate::cpz::read_version(reader)?,
+            ArchiveVersion::Cpz5 | ArchiveVersion::Cpz7
+        )
+    {
+        return Startup::execute(script, p)?.inspect(reader, target);
+    }
+    literal_archive_index(reader, script, target)
 }
 
 /// Read the literal 0x201f packing-mode setting from the startup prefix.
@@ -43,12 +81,12 @@ pub fn packing_mode_from_start(script: &Script) -> Result<u32, crate::FormatErro
         bytecode::{self, InstructionKind, Term},
     };
     let instructions =
-        bytecode::decode_layout(script.code(), script.header.entry_pc, &script.labels())
+        bytecode::decode_layout(script.code(), script.header().entry_pc, &script.labels())
             .map_err(|_| FormatError("invalid startup script layout"))?;
     let mut value = None;
     let mut pushed = None;
     for instruction in instructions {
-        if instruction.pc < script.header.entry_pc as usize {
+        if instruction.pc < script.header().entry_pc as usize {
             continue;
         }
         match instruction.kind {
@@ -87,17 +125,24 @@ pub fn cpz7_parameters_from_start(
     script: &Script,
     basename: &[u8],
 ) -> Result<Option<Cpz7Parameters>, crate::FormatError> {
+    literal_parameters(script, ArchiveTarget::Basename(basename))
+}
+
+fn literal_parameters(
+    script: &Script,
+    target: ArchiveTarget<'_>,
+) -> Result<Option<Cpz7Parameters>, crate::FormatError> {
     use crate::{
         FormatError,
         bytecode::{self, InstructionKind, Term},
     };
     let instructions =
-        bytecode::decode_layout(script.code(), script.header.entry_pc, &script.labels())
+        bytecode::decode_layout(script.code(), script.header().entry_pc, &script.labels())
             .map_err(|_| FormatError("invalid startup script layout"))?;
     let strings = script.strings()?;
     let literal = |at: usize, kind: u16, tag: u16| -> Option<u32> {
         let expr = instructions.get(at)?;
-        if expr.pc < script.header.entry_pc as usize {
+        if expr.pc < script.header().entry_pc as usize {
             return None;
         }
         if instructions.get(at + 1)?.opcode != 0x430 {
@@ -121,7 +166,7 @@ pub fn cpz7_parameters_from_start(
     let mut pack_mode = None;
     let mut found = None;
     for (i, instruction) in instructions.iter().enumerate() {
-        if instruction.pc < script.header.entry_pc as usize {
+        if instruction.pc < script.header().entry_pc as usize {
             continue;
         }
         match &instruction.kind {
@@ -150,11 +195,7 @@ pub fn cpz7_parameters_from_start(
                     .find(|entry| entry.offset == path_offset as usize)
                     .ok_or(FormatError("invalid CPZ7 archive path reference"))?
                     .bytes;
-                let name = path
-                    .rsplit(|b| matches!(b, b'/' | b'\\'))
-                    .next()
-                    .unwrap_or(path);
-                if !name.eq_ignore_ascii_case(basename) {
+                if !target.matches(path) {
                     continue;
                 }
                 if literal(at + 10, 0x200, 0x100).is_none() {
@@ -201,34 +242,119 @@ impl<S: ScriptSource> ScriptSource for PatchedScripts<S> {
     }
 }
 
+enum ScriptIndex {
+    Open(Box<ArchiveIndex>),
+    Registered {
+        version: ArchiveVersion,
+        relative: PathBuf,
+        settings: Result<ArchiveSettings, crate::FormatError>,
+    },
+}
 pub struct ArchiveScripts<R> {
     reader: R,
-    index: ArchiveIndex,
+    index: ScriptIndex,
+    lookup_pc: usize,
 }
 impl<R: Read + Seek> ArchiveScripts<R> {
+    fn opened(reader: R, index: ArchiveIndex) -> Self {
+        Self {
+            reader,
+            index: ScriptIndex::Open(Box::new(index)),
+            lookup_pc: 0,
+        }
+    }
     pub fn from_start(mut reader: R, script: &Script, basename: &[u8]) -> Result<Self, LoadError> {
         let index = archive_index_from_start(&mut reader, script, basename)?;
-        Ok(Self { reader, index })
+        Ok(Self::opened(reader, index))
     }
     pub fn new(mut reader: R) -> Result<Self, LoadError> {
         let index = ArchiveIndex::read(&mut reader)?;
-        Ok(Self { reader, index })
+        Ok(Self::opened(reader, index))
     }
-
     pub fn with_cpz7_parameters(
         mut reader: R,
         parameters: Cpz7Parameters,
     ) -> Result<Self, LoadError> {
         let index = ArchiveIndex::read_with_cpz7_parameters(&mut reader, parameters)?;
-        Ok(Self { reader, index })
+        Ok(Self::opened(reader, index))
+    }
+    pub(crate) fn deferred(
+        mut reader: R,
+        fs: &dyn HostFs,
+        root: &Path,
+        relative: &Path,
+    ) -> Result<Self, LoadError> {
+        let v = crate::cpz::read_version(&mut reader)?;
+        if !matches!(v, ArchiveVersion::Cpz5 | ArchiveVersion::Cpz7) {
+            return Self::new(reader);
+        }
+        Ok(Self {
+            reader,
+            index: ScriptIndex::Registered {
+                version: v,
+                relative: relative.to_owned(),
+                settings: archive_settings(
+                    &Bootstrap::default(),
+                    v,
+                    ArchiveTarget::game(fs, root, relative),
+                ),
+            },
+            lookup_pc: 0,
+        })
+    }
+    pub(crate) fn configure(&mut self, state: &Bootstrap, fs: &dyn HostFs, root: &Path) {
+        if let ScriptIndex::Registered {
+            version,
+            relative,
+            settings,
+        } = &mut self.index
+        {
+            *settings = archive_settings(state, *version, ArchiveTarget::game(fs, root, relative));
+        }
+    }
+    pub(crate) fn set_lookup_pc(&mut self, pc: usize) {
+        self.lookup_pc = pc;
+    }
+    // Early auto-resume detection must not fix the index used by subsequent live commands.
+    pub(crate) fn preview(
+        &mut self,
+        name: &[u8],
+        fs: &dyn HostFs,
+        root: &Path,
+        script: Option<&Script>,
+        profile: &EngineProfile,
+    ) -> Result<Script, LoadError> {
+        if let ScriptIndex::Registered { relative, .. } = &self.index {
+            let startup = Startup::execute(script.ok_or("missing startup script")?, profile)?;
+            let index =
+                startup.inspect(&mut self.reader, ArchiveTarget::game(fs, root, relative))?;
+            return Ok(Script::decode(
+                &index.read_entry(&mut self.reader, index.find(name)?)?,
+            )?);
+        }
+        self.load(name)
     }
 }
 impl<R: Read + Seek> ScriptSource for ArchiveScripts<R> {
     fn load(&mut self, name: &[u8]) -> Result<Script, LoadError> {
-        let entry = self.index.find(name)?;
-        Ok(Script::decode(
-            &self.index.read_entry(&mut self.reader, entry)?,
-        )?)
+        if let ScriptIndex::Registered {
+            relative, settings, ..
+        } = &self.index
+        {
+            let settings = settings.as_ref().map_err(|e| {
+                format!(
+                    "script lookup at PC {:#x} ({}): {e}",
+                    self.lookup_pc,
+                    relative.display()
+                )
+            })?;
+            self.index = ScriptIndex::Open(Box::new(settings.open(&mut self.reader)?));
+        }
+        let ScriptIndex::Open(index) = &self.index else {
+            unreachable!("archive opened above")
+        };
+        let entry = index.find(name)?;
+        Ok(Script::decode(&index.read_entry(&mut self.reader, entry)?)?)
     }
 }
 
@@ -256,6 +382,8 @@ pub enum ControlEvent {
 #[derive(Clone)]
 pub struct ScriptControl {
     callbacks: BTreeMap<u8, Callback>,
+    armed: [bool; 64],
+    cvns: bool,
     settings: BTreeMap<u16, u32>,
     virtual_tick: u32,
     close_requested: bool,
@@ -266,9 +394,19 @@ impl ScriptControl {
     pub fn new(virtual_tick: u32) -> Self {
         Self {
             callbacks: BTreeMap::new(),
+            armed: [false; 64],
+            cvns: false,
             settings: BTreeMap::new(),
             virtual_tick,
             close_requested: false,
+        }
+    }
+
+    /// Configures script control rules for `profile` (`cvns` uses `0x446660` callback rules).
+    pub fn for_profile(profile: &crate::profile::EngineProfile, virtual_tick: u32) -> Self {
+        Self {
+            cvns: profile.family == crate::profile::Family::Cvns,
+            ..Self::new(virtual_tick)
         }
     }
     pub fn callbacks(&self) -> &BTreeMap<u8, Callback> {
@@ -290,7 +428,7 @@ impl ScriptControl {
     /// consumed once dispatched. Returned in push order: the last one runs
     /// first.
     pub fn due_callbacks(&mut self, windows_shown: [bool; 8]) -> Vec<(u8, usize)> {
-        if self.settings.get(&0x208c).copied().unwrap_or(0) != 0 {
+        if !self.cvns && self.settings.get(&0x208c).copied().unwrap_or(0) != 0 {
             return Vec::new();
         }
         let close_requested = std::mem::take(&mut self.close_requested);
@@ -300,9 +438,24 @@ impl ScriptControl {
                 .filter(|c| c.enabled)
                 .map(|c| (c.script_slot, c.target as usize))
         };
+        let armed = std::mem::replace(&mut self.armed, [false; 64]);
         if self.settings.get(&0x2089).copied().unwrap_or(0) == 0 {
-            return registered(if close_requested { 26 } else { 28 })
-                .into_iter()
+            let slot = if !self.cvns && close_requested {
+                26
+            } else {
+                28
+            };
+            return registered(slot).into_iter().collect();
+        }
+        if self.cvns {
+            return (0..64u8)
+                .filter(|&index| match index {
+                    3..=5 | 28 => true,
+                    10..=13 => windows_shown[usize::from(index - 10)],
+                    32..=63 => armed[usize::from(index)],
+                    _ => false,
+                })
+                .filter_map(registered)
                 .collect();
         }
         (0..32u8)
@@ -332,23 +485,9 @@ impl ScriptControl {
         }
     }
 
-    pub fn try_handle<S: ScriptSource>(
-        &mut self,
-        vm: &mut Machine<'_>,
-        source: &mut S,
-    ) -> Result<Option<ControlEvent>, LoadError> {
-        let Some((pc, command)) = vm.pending_system() else {
-            return Ok(None);
-        };
-        if !matches!(command, 0x80 | 0x81 | 0x83 | 0x88..=0x8c) {
-            return Ok(None);
-        }
-        self.handle(&mut Call::new(vm, pc, command), source)
-            .map(Some)
-    }
     pub(crate) fn handle(
         &mut self,
-        call: &mut Call<'_, '_>,
+        call: &mut Call<'_>,
         source: &mut dyn ScriptSource,
     ) -> Result<ControlEvent, LoadError> {
         let (pc, command) = (call.pc, call.command);
@@ -365,6 +504,17 @@ impl ScriptControl {
                 };
                 let script = source.load(&name)?;
                 call.enter_common(slot, name, script)?;
+                return Ok(ControlEvent::CommonEntered {
+                    slot: call.vm.current_slot(),
+                });
+            }
+            0x412 => {
+                let name = {
+                    let raw = call.argument(4, argument_names(command)[0])?;
+                    call.vm.resolve_string(raw)?
+                };
+                let script = source.load(&name)?;
+                call.enter_cvns_common(name, script)?;
                 return Ok(ControlEvent::CommonEntered {
                     slot: call.vm.current_slot(),
                 });
@@ -441,6 +591,18 @@ impl ScriptControl {
                     callback.enabled = false;
                     callback.target = u32::MAX;
                 }
+                self.armed[slot as usize] = false;
+                0x4004
+            }
+            0x42a => {
+                let slot = call.argument(4, argument_names(command)[0])?;
+                let enabled = self.settings.get(&0x2089).copied().unwrap_or(0) != 0;
+                if enabled && (1..64).contains(&(slot as i32)) {
+                    let index = slot as usize;
+                    if self.callbacks.get(&(slot as u8)).is_some_and(|c| c.enabled) {
+                        self.armed[index] = true;
+                    }
+                }
                 0x4004
             }
             _ => unreachable!("registered script-control command"),
@@ -453,6 +615,7 @@ impl ScriptControl {
 fn argument_names(command: u16) -> &'static [&'static str] {
     match command {
         0x80 => &["main script"],
+        0x412 => &["common script"],
         0x81 => &["common slot", "common script"],
         0x83 => &["high word", "low word"],
         0x88 => &[
@@ -463,7 +626,7 @@ fn argument_names(command: u16) -> &'static [&'static str] {
             "parameter 20",
         ],
         0x89 | 0x8c => &["enabled"],
-        0x8a | 0x8b => &["callback slot"],
+        0x8a | 0x8b | 0x42a => &["callback slot"],
         _ => unreachable!("registered script-control arguments"),
     }
 }

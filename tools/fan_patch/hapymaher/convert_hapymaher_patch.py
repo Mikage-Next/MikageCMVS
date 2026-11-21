@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import shutil
@@ -19,8 +18,9 @@ import sys
 import tempfile
 import zipfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mai_characters import character_map
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from fan_patch.common import cmvs_patch_command, sha256
+from fan_patch.mai_characters import character_map
 
 LIMIT = 64 * 1024 * 1024
 PATCH_SHA256 = "149cbd277d71d4ecb9012e9cbbbabf8cd6de9bd91114921bbacc255498216d52"
@@ -30,14 +30,6 @@ BASE_HASHES = {
     "data/pack/start.ps3": "62fc84b6231432a0aed498065329b630f76ef4c9e114c1bf6dbdc4e564c0399e",
     "data/pack/script.cpz": "ae25d8e3bd2a2f7539c81dafe0b6cba445c5c346c6c26f7702337e10a86ed103",
 }
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def convert(game: Path, patch: Path, output: Path, encoding: str = "utf-8") -> None:
@@ -52,8 +44,6 @@ def convert(game: Path, patch: Path, output: Path, encoding: str = "utf-8") -> N
             raise ValueError(f"Unsupported original game: {name}")
     if sha256(patch) != PATCH_SHA256:
         raise ValueError("Unsupported patch ZIP (SHA-256 mismatch)")
-    tool = Path(__file__).resolve().parent
-    repository = tool.parents[2]
     with tempfile.TemporaryDirectory(prefix="cmvs-hapymaher-") as temp:
         stage = Path(temp)
         with zipfile.ZipFile(patch) as archive:
@@ -89,11 +79,7 @@ def convert(game: Path, patch: Path, output: Path, encoding: str = "utf-8") -> N
                     counts[1] += 1
             if counts != [151, 111]:
                 raise ValueError("Unexpected patch script/image coverage")
-        subprocess.run([
-            "cargo", "run", "--offline", "--locked", "--release", "--manifest-path",
-            str(tool / "Cargo.toml"), "--target-dir", str(repository / "target/fan-patch-hapymaher"),
-            "--", str(game), str(stage), encoding,
-        ], check=True)
+        subprocess.run(cmvs_patch_command("hapymaher", str(game), str(stage), encoding), check=True)
         with (stage / "scripts.tsv").open() as stream:
             scripts = list(csv.DictReader(stream, delimiter="\t"))
         with (stage / "images.tsv").open() as stream:
@@ -119,9 +105,6 @@ def convert(game: Path, patch: Path, output: Path, encoding: str = "utf-8") -> N
             patch_sha256=PATCH_SHA256, original_sha256=BASE_HASHES,
             text_substitutions={"♪": "☆", "・": "·"} if encoding == "gbk" else {},
             output_sha256=outputs, scripts=scripts, images=images,
-            limitations=["Source translation is the 2017-07-11 test patch.",
-                         "No patch exe/DLL, settings or saves installed.",
-                         "Full routes and original save interoperability are not verified."],
         )
         (output / "conversion.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Converted 159 scripts / 111 images to {output}")

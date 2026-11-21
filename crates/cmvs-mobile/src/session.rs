@@ -1,4 +1,4 @@
-//! One running game: the engine's `Startup` plus the host-side services cmvs-desktop
+//! One running game: the engine's `Runtime` plus the host-side services cmvs-desktop
 //! provides on a PC (fonts, input, audio, GPU presentation), without a window system.
 use crate::{
     audio,
@@ -11,14 +11,12 @@ use crate::{
 };
 use cmvs_core::{
     TextEncoding,
-    input::KeyBindings,
-    message::MESSAGE_WINDOWS,
-    ps3::Script,
-    raster::RgbaImage,
-    runner::{SaveTime, Startup, StartupEvent, load_start},
-    scene_render::prepare_scene,
-    settings::DEFAULT_FONT_FACE,
-    system_save::ProfileSystemSave,
+    format::{ps3::Script, system_save::ProfileSystemSave},
+    host::{input::KeyBindings, settings::DEFAULT_FONT_FACE},
+    render::{message::MESSAGE_WINDOWS, raster::RgbaImage, scene_render::prepare_scene},
+    runtime::{
+        Runtime, RuntimeEvent, RuntimeOptions, SaveStorage, SaveTime, load_start,
+    },
 };
 use cmvs_wgpu::{GpuFrame, Presenter, Renderer, wgpu};
 use rodio::mixer::MixerSource;
@@ -30,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 /// VM time per `step` before the frame is handed back to the host. The VM keeps
 /// going on the next step; effects advance and frames draw only at its yields.
@@ -83,7 +81,7 @@ struct Gpu {
 
 pub struct Session {
     // Fields drop in order: the engine (and its audio channels) before the GPU.
-    startup: Startup<'static>,
+    startup: Runtime,
     root: PathBuf,
     bindings: KeyBindings,
     input: MobileInput,
@@ -134,9 +132,7 @@ impl Session {
                 ),
             ),
         }
-        // `Startup` borrows the start script for its whole life. A session lives
-        // about as long as the app, and a start script is a few kilobytes, so it is
-        // leaked rather than made self-referential.
+        // A start script from the patch replaces the game's own.
         let start = match patch
             .as_ref()
             .map(|p| p.script(&selection.game.files.start_name()))
@@ -165,28 +161,35 @@ impl Session {
             None => log::emit(log::INFO, &format!("text {encoding:?}")),
         }
         let font = font_renderer(&config.fonts)?.with_text_encoding(encoding);
-        let script: &'static _ = Box::leak(Box::new(start));
-        let mut startup =
-            Startup::new_with_encoding(script, &root, &selection.game, 0, encoding)?;
-        startup.set_patch(patch);
-        // MGV1 movies (Ogg/Theora), decoded by upstream's pure-Rust cmvs-video, which
-        // decodes ahead on a worker thread as the desktop and console hosts do.
-        startup.set_mgv_factory(Box::new(cmvs_video::PrefetchTheoraFactory::default()));
-        // The gate runs presumed and unreviewed commands unless told to block them
-        // (upstream's --block-* research switches); a player never blocks, recorded
-        // game or not.
         // `<game>/savedata` is the one folder inside the game that may be written,
         // through upstream's explicit opt-in; any other folder must be outside it.
         let game_savedata = root.join("savedata");
         let save_dir = config.save_dir.clone().unwrap_or_else(|| game_savedata.clone());
         let in_game = save_dir == game_savedata
             || save_dir.canonicalize().is_ok_and(|dir| dir == game_savedata);
-        if in_game {
-            startup.set_save_profile(ProfileSystemSave::open_game_savedata(&root)?)?;
+        let saves = if in_game {
+            SaveStorage::Profile(ProfileSystemSave::open_game_savedata(&root)?)
         } else {
-            startup.set_user_data_directory(&save_dir)?;
-        }
-        startup.set_decode_movie_frames(true);
+            SaveStorage::UserDirectory(save_dir)
+        };
+        // The gate runs presumed and unreviewed commands unless told to block them
+        // (upstream's --block-* research switches); a player never blocks, recorded
+        // game or not, so those options keep their `false` defaults.
+        let mut startup = Runtime::with_options(
+            start,
+            &root,
+            &selection.game,
+            RuntimeOptions {
+                encoding,
+                saves,
+                decode_cmv_frames: true,
+                ..Default::default()
+            },
+        )?;
+        startup.set_patch(patch);
+        // MGV1 movies (Ogg/Theora), decoded by upstream's pure-Rust cmvs-video, which
+        // decodes ahead on a worker thread as the desktop and console hosts do.
+        startup.set_mgv_factory(Box::new(cmvs_video::PrefetchTheoraFactory::default()));
         let (mixer, audio_source) = audio::mixer();
         startup.set_audio_backend(Box::new(cmvs_audio::NativeAudio::from_mixer(&root, mixer)?))?;
         let offset = config.utc_offset_ms;
@@ -235,7 +238,7 @@ impl Session {
     pub fn status(&self) -> &Status {
         &self.status
     }
-    pub fn startup(&self) -> &Startup<'static> {
+    pub fn startup(&self) -> &Runtime {
         &self.startup
     }
     /// The mixer's output, once; the host plays it through an [`audio::AudioOutput`].
@@ -387,33 +390,38 @@ impl Session {
                     ),
                 );
             }
-            if event != StartupEvent::Inactive {
-                self.frame_ready = event == StartupEvent::Yield;
+            if event != RuntimeEvent::Inactive {
+                self.frame_ready = event == RuntimeEvent::Yield;
             }
             match event {
-                StartupEvent::Quit => {
+                RuntimeEvent::Quit => {
                     log::emit(log::INFO, "the game quit");
                     self.status = Status::Ended;
                     return self.status.clone();
                 }
-                StartupEvent::Yield => {
+                RuntimeEvent::Yield => {
                     self.input_due = true;
                     boundary = true;
                     break;
                 }
-                StartupEvent::Inactive => {
+                RuntimeEvent::Inactive => {
                     boundary = true;
                     break;
                 }
-                StartupEvent::Progress | StartupEvent::SnapshotCaptured => {}
-                StartupEvent::MainEnteredWithoutSnapshot => log::emit(
+                RuntimeEvent::Progress | RuntimeEvent::SnapshotCaptured => {}
+                RuntimeEvent::MainEnteredWithoutSnapshot => log::emit(
                     log::WARN,
                     "main entered without a save snapshot: saving is off",
                 ),
-                StartupEvent::Unhandled { command, .. } => {
+                RuntimeEvent::Unhandled { command, .. } => {
                     return self.fail(format!("unsupported system command 0x{command:04x}"));
                 }
-                StartupEvent::MainPreparedNeedsSnapshot => {
+                // Only an asynchronous `poll_device_frame` reports this, and the
+                // mobile backend answers readback synchronously.
+                RuntimeEvent::DeviceFramePending => {
+                    return self.fail("unexpected pending device frame readback".into());
+                }
+                RuntimeEvent::MainPreparedNeedsSnapshot => {
                     return self.fail("the save snapshot could not be built".into());
                 }
             }
@@ -427,7 +435,7 @@ impl Session {
         }
         self.log_advance_state();
         let dt = std::mem::take(&mut self.pending_ms);
-        if let Err(e) = self.startup.advance_decoded_frame(dt) {
+        if let Err(e) = self.startup.advance_playback(dt) {
             return self.fail(e.to_string());
         }
         if self.frame_ready
@@ -499,7 +507,7 @@ impl Session {
 
     /// Saves the settings the game keeps outside its system save.
     pub fn close(mut self) {
-        let display = cmvs_core::settings::DisplayPreferences {
+        let display = cmvs_core::host::settings::DisplayPreferences {
             fullscreen: self.display.fullscreen,
             aspect_mode: self.display.aspect_mode,
             aspect_scaling: self.display.aspect_scaling,
